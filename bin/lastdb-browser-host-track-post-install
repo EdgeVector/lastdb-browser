@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# host-track post_install for lastdb-browser.
+#
+# The artifact ships source, not build output, so the UI is built here — the
+# same shape `search` uses. The bridge itself has no runtime dependencies, so
+# dev dependencies are pruned once the bundle exists and the installed tree is
+# left as plain Node with a static dist/.
+set -euo pipefail
+
+APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$APP_ROOT"
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "lastdb-browser post-install: npm not on PATH" >&2
+  exit 1
+fi
+
+echo "lastdb-browser post-install: installing build deps"
+npm ci --no-audit --no-fund
+
+echo "lastdb-browser post-install: building UI"
+npm run build
+test -f dist/index.html || { echo "post-install: dist/index.html not produced" >&2; exit 1; }
+
+echo "lastdb-browser post-install: pruning dev dependencies"
+# The bridge is zero-dependency; nothing under node_modules is needed to run.
+rm -rf node_modules
+
+node --check server.mjs
+echo "lastdb-browser post-install: OK"

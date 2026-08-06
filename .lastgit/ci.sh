@@ -21,6 +21,26 @@ test -f dist/index.html || { echo "FAIL: dist/index.html not produced"; exit 1; 
 echo "== bridge syntax =="
 node --check server.mjs
 
+echo "== shell entrypoints parse =="
+bash -n .lastgit/ci.sh
+bash -n bin/lastdb-browser
+bash -n bin/lastdb-browser-host-track-post-install
+
+echo "== venue + inert mirror =="
+# The GitHub copy is a read-only mirror; a workflow directory here would give it
+# something to run.
+test "$(head -n 1 .last-stack/pr-venue)" = "lastgit"
+test ! -e .github/workflows
+
+echo "== artifact declaration covers what the launcher needs =="
+# host-track packs exactly `.lastgit/artifacts.json` paths. If the launcher, the
+# post-install, or a build input is missing from that list, the installed app is
+# broken in a way nothing else here would catch.
+for required in README.md bin index.html package.json package-lock.json server.mjs src vite.config.js; do
+  grep -q "\"$required\"" .lastgit/artifacts.json \
+    || { echo "FAIL: $required missing from .lastgit/artifacts.json"; exit 1; }
+done
+
 echo "== no host identity in shipped tree =="
 # The public mirror must not carry usernames, home paths, emails or private IPs.
 if grep -rnE '/Users/[a-z]|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|192\.168\.|10\.[0-9]+\.[0-9]+\.[0-9]+|100\.[0-9]+\.[0-9]+\.[0-9]+' \
