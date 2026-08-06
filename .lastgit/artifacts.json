@@ -1,0 +1,17 @@
+{
+  "artifacts": [
+    {
+      "app": "lastdb-browser",
+      "paths": [
+        "README.md",
+        "bin",
+        "index.html",
+        "package.json",
+        "package-lock.json",
+        "server.mjs",
+        "src",
+        "vite.config.js"
+      ]
+    }
+  ]
+}

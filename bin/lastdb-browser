@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Launcher for the LastDB Browser.
+#
+# Starts the bridge (which also serves the built UI) and opens a browser at it.
+# Installed by host-track and symlinked onto PATH, so this resolves its own
+# install root rather than assuming a checkout.
+set -euo pipefail
+
+SELF="${BASH_SOURCE[0]}"
+# Resolve through the PATH symlink to the artifact's real bin/ directory.
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(cd "$(dirname "$SELF")" && pwd)/$LINK" ;;
+  esac
+done
+APP_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+
+PORT="${LASTDB_BROWSER_PORT:-${PORT:-7666}}"
+export PORT
+export LASTDB_SOCKET="${LASTDB_SOCKET:-$HOME/.lastdb/data/folddb.sock}"
+
+if [ ! -S "$LASTDB_SOCKET" ]; then
+  echo "lastdb-browser: no LastDB socket at $LASTDB_SOCKET" >&2
+  echo "  Is the node running? Override with LASTDB_SOCKET=/path/to/folddb.sock" >&2
+  exit 1
+fi
+
+if [ ! -f "$APP_ROOT/dist/index.html" ]; then
+  echo "lastdb-browser: UI not built at $APP_ROOT/dist" >&2
+  echo "  Run: host-track refresh lastdb-browser" >&2
+  exit 1
+fi
+
+case "${1:-}" in
+  --no-open) shift ;;
+  -h|--help)
+    echo "usage: lastdb-browser [--no-open]"
+    echo "  LASTDB_BROWSER_PORT  listen port (default 7666)"
+    echo "  LASTDB_SOCKET        node socket (default ~/.lastdb/data/folddb.sock)"
+    exit 0
+    ;;
+  *)
+    # Give the bridge a moment to bind before pointing a browser at it.
+    ( sleep 1; command -v open >/dev/null 2>&1 && open "http://127.0.0.1:$PORT" || true ) &
+    ;;
+esac
+
+exec node "$APP_ROOT/server.mjs"
