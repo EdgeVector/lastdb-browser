@@ -1,0 +1,22 @@
+{
+  "name": "lastdb-browser",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Interactive data browser for a local LastDB node: schemas -> keys -> records -> atoms.",
+  "scripts": {
+    "dev": "concurrently -n bridge,vite -c cyan,magenta \"node server.mjs\" \"vite\"",
+    "bridge": "node server.mjs",
+    "build": "vite build",
+    "start": "vite build && node server.mjs"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "vite": "^6.0.7"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

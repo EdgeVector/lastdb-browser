@@ -1,0 +1,336 @@
+// Data-plane client.
+//
+// Every function here is one node round-trip, named for the drill-down step it
+// serves. Nothing fans out, nothing prefetches the next level: the panes call
+// these only when a pane is actually opened. That is the whole hydration policy
+// and it is enforced here rather than by discipline in the components.
+
+const listeners = new Set();
+
+/** Subscribe to the request log. Returns an unsubscribe function. */
+export function onRequest(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+let seq = 0;
+
+async function call(url, init, label) {
+  const id = ++seq;
+  const started = performance.now();
+  let res;
+  let payload;
+  try {
+    res = await fetch(url, init);
+    payload = await res.json();
+  } catch (err) {
+    const entry = {
+      id,
+      label,
+      url,
+      ok: false,
+      error: err.message,
+      clientMs: Math.round(performance.now() - started),
+    };
+    listeners.forEach((fn) => fn(entry));
+    throw new Error(`${label}: ${err.message}`);
+  }
+  const entry = {
+    id,
+    label,
+    url,
+    ok: payload.ok !== false,
+    nodeMs: payload.ms ?? null,
+    clientMs: Math.round(performance.now() - started),
+    bytes: payload.bytes ?? null,
+    fullScan: payload.full_scan === true,
+    error: payload.ok === false ? payload.error : null,
+  };
+  listeners.forEach((fn) => fn(entry));
+
+  if (payload.ok === false) throw new Error(payload.error || `${label} failed`);
+  return payload;
+}
+
+export async function health() {
+  return call('/db/health', undefined, 'health');
+}
+
+/**
+ * Level 1 — the schema catalog.
+ *
+ * This is the only cached read. `include_counts=true` is what tells us which
+ * schemas actually hold data, and it costs a full key-count pass on the node
+ * (~30s here), so the bridge caches it and this is the only place that can ask
+ * for a refresh.
+ */
+export async function schemas({ refresh = false } = {}) {
+  return call(`/db/schemas${refresh ? '?refresh=1' : ''}`, undefined, 'schemas');
+}
+
+/**
+ * Level 2a — one schema's shape: field types, descriptions, key layout, and the
+ * per-field molecule UUIDs. Fetched only when a schema is opened.
+ */
+export async function schemaDetail(name) {
+  const payload = await call(
+    `/db/schema/${encodeURIComponent(name)}`,
+    undefined,
+    `schema ${short(name)}`,
+  );
+  return payload.data.schema;
+}
+
+async function query(body, { scan = false, label }) {
+  const payload = await call(
+    `/db/query${scan ? '?scan=1' : ''}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    label,
+  );
+  return payload.data;
+}
+
+/**
+ * Level 2b — a page of KEYS in a schema.
+ *
+ * Projects exactly ONE field. The key itself rides on every row's envelope
+ * regardless of projection, and each projected field costs its atom metadata on
+ * every row, so one field is the cheapest read that can still return rows.
+ *
+ * `Page` is not key-restricted, so it trips the node's full-scan gate — hence
+ * `scan: true`. This is the admin/offline read that gate carves out.
+ *
+ * Which field is not a free choice. A row is returned only when the projected
+ * field resolves to an atom on that row, and a schema's declared key fields are
+ * frequently not stored as field atoms at all — the key lives on the envelope.
+ * A field that is empty across the schema therefore lists nothing, and because
+ * an empty projection expands to the full field set, the widest possible read
+ * is the one most likely to come back empty. There is no single projection that
+ * lists keys on every schema, and a wide projection is not a safe fallback.
+ *
+ * `total_count` follows the projection too, so it is a count for the field in
+ * use rather than a census of the table.
+ */
+export async function keyPage(schemaName, field, { offset, limit }) {
+  return query(
+    {
+      schema_name: schemaName,
+      fields: [field],
+      filter: { Page: { offset, limit } },
+    },
+    { scan: true, label: `keys ${short(schemaName)}.${field} @${offset}` },
+  );
+}
+
+/**
+ * Candidate projection fields, best first.
+ *
+ * The HASH KEY FIELD leads, and that is not a stylistic choice — the projection
+ * decides whether the returned key is usable at all. For one page of rows, only
+ * the hash component of the key changes with the projection:
+ *
+ *   projecting the hash field    -> key.hash is the plaintext value
+ *   projecting any other field   -> key.hash is the ENCODED partition token
+ *
+ * The range component is the same either way. The token cannot be fed back to a
+ * HashKey read, so a listing built on one looks perfectly normal and every
+ * record opened from it resolves to nothing. The plaintext is recoverable only
+ * from the hash field's own value, so no other field can stand in for it.
+ *
+ * Hence: hash field, then range field, then data fields as a last resort for
+ * schemas whose key fields carry no atoms at all. `keyIsAddressable` marks
+ * which of those cases the UI is in.
+ */
+export function projectionCandidates(schema) {
+  const fields = schema?.fields ?? [];
+  const hashField = schema?.key?.hash_field;
+  const rangeField = schema?.key?.range_field;
+  const keyFields = [hashField, rangeField].filter((f) => f && fields.includes(f));
+  const nonKey = fields.filter((f) => !keyFields.includes(f));
+  return [...keyFields, ...nonKey];
+}
+
+/** Does listing by `field` yield keys that a keyed read can actually address? */
+export function keyIsAddressable(schema, field) {
+  return Boolean(field) && field === schema?.key?.hash_field;
+}
+
+/**
+ * Find a projection that actually returns rows, then return that page.
+ *
+ * Bounded to `maxProbes` reads: on a large schema each attempt is a real scan,
+ * and the point is to get the user a usable list without silently spending the
+ * node's afternoon. The field that worked is reported back so paging can reuse
+ * it instead of re-probing, and so the UI can show what it listed by.
+ */
+export async function keyPageProbing(schema, { offset, limit }, maxProbes = 4) {
+  const candidates = projectionCandidates(schema);
+  let last = null;
+  for (const field of candidates.slice(0, maxProbes)) {
+    const data = await keyPage(schema.name, field, { offset, limit });
+    last = { data, field, probed: true };
+    if ((data.results?.length ?? 0) > 0) return last;
+
+    // An empty PAGE is not an empty FIELD. `Page` windows over the whole key
+    // set and only then drops tombstoned keys, so on a heavily deleted schema a
+    // window can land entirely on deleted rows and come back empty while live
+    // rows sit further in.
+    //
+    // Abandoning the field here is the expensive mistake: the next candidate
+    // is a NON-key field, and listing by one of those yields blinded partition
+    // tokens instead of real hashes, so every key it produces is unopenable.
+    // Staying on a sparse-but-addressable field beats moving to a populated
+    // dead-end, so only a field with no keys at all is disqualified.
+    if ((data.total_count ?? 0) > 0) return last;
+  }
+  return last ?? { data: { results: [], total_count: 0 }, field: null, probed: true };
+}
+
+/**
+ * Level 2c — a keyed read: one partition (HashKey) or one record
+ * (HashRangeKey), still projecting only the key fields.
+ *
+ * This is the node's supported access pattern — O(1) / O(log M) — so it does
+ * NOT carry the scan header, and it stays fast on schemas where the paged
+ * browse is slow.
+ */
+export async function keyLookup(schemaName, keyFields, filter) {
+  return query(
+    { schema_name: schemaName, fields: keyFields, filter },
+    { label: `lookup ${short(schemaName)}` },
+  );
+}
+
+/**
+ * Level 3 — one record, hydrated.
+ *
+ * Now, and only now, do we ask for every field. The response carries per-field
+ * metadata (atom_uuid, molecule_uuid, version, conflict flag), which is what
+ * makes level 4 a direct fetch rather than a search.
+ */
+export function keyFilter(key) {
+  return key.range == null || key.range === ''
+    ? { HashKey: key.hash }
+    : { HashRangeKey: { hash: key.hash, range: key.range } };
+}
+
+export async function record(schemaName, fields, key) {
+  const data = await query(
+    { schema_name: schemaName, fields, filter: keyFilter(key) },
+    { label: `record ${short(key.hash)}` },
+  );
+  return data.results?.[0] ?? null;
+}
+
+/**
+ * Rebuild a record one field at a time.
+ *
+ * The wide read above returns a row only if EVERY projected field resolves on
+ * it, so a single missing field blanks the whole record — and on a schema that
+ * has gained fields over time, that is the normal case for older rows rather
+ * than an exotic one. Reading each field on its own removes the coupling: a
+ * field that has no atom drops itself instead of the record.
+ *
+ * This is the fallback, not the default: it is N keyed reads instead of one.
+ * Keyed reads are the cheap path, and they run concurrently, but the wide read
+ * is still strictly better when it works.
+ */
+export async function recordByField(schemaName, fields, key, maxFields = 48) {
+  const filter = keyFilter(key);
+  const chosen = fields.slice(0, maxFields);
+  const settled = await Promise.all(
+    chosen.map(async (f) => {
+      try {
+        const data = await query(
+          { schema_name: schemaName, fields: [f], filter },
+          { label: `field ${f}` },
+        );
+        return [f, data.results?.[0] ?? null];
+      } catch {
+        return [f, null];
+      }
+    }),
+  );
+  const row = { key, fields: {}, metadata: {} };
+  let any = false;
+  for (const [f, res] of settled) {
+    if (!res) continue;
+    any = true;
+    if (f in (res.fields || {})) row.fields[f] = res.fields[f];
+    if (res.metadata?.[f]) row.metadata[f] = res.metadata[f];
+  }
+  return any ? row : null;
+}
+
+/** Level 4 — the atom body itself. */
+export async function atom(uuid) {
+  const payload = await call(`/db/atom/${encodeURIComponent(uuid)}`, undefined, `atom ${short(uuid)}`);
+  return payload.data;
+}
+
+/**
+ * Level 4 (optional) — prior versions of one field at one key.
+ *
+ * Scoped by hash/range on purpose: a molecule is per-FIELD and shared by every
+ * key in the schema, so an unscoped history read is not this record's history.
+ */
+export async function history(moleculeUuid, key) {
+  const qs = new URLSearchParams();
+  if (key?.hash != null) qs.set('hash', key.hash);
+  if (key?.range) qs.set('range', key.range);
+  const payload = await call(
+    `/db/history/${encodeURIComponent(moleculeUuid)}?${qs}`,
+    undefined,
+    `history ${short(moleculeUuid)}`,
+  );
+  return payload.data;
+}
+
+/** Level 4 (optional) — the protein this field's molecule is bound to, if any. */
+export async function proteinOfMolecule(moleculeUuid) {
+  const payload = await call(
+    `/db/protein/of-molecule/${encodeURIComponent(moleculeUuid)}`,
+    undefined,
+    `protein ${short(moleculeUuid)}`,
+  );
+  return payload.data;
+}
+
+/**
+ * Does this value name a file that exists on disk?
+ *
+ * Called for an atom's `source_file_name` and, when that is absent, for the
+ * atom's own body — plenty of schemas keep a path in an ordinary field, and
+ * this node populates `source_file_name` on nothing at all.
+ */
+export async function statFile(candidate) {
+  if (!candidate) return { exists: false };
+  const payload = await call(
+    `/db/file?path=${encodeURIComponent(candidate)}`,
+    undefined,
+    `stat ${short(candidate, 14)}`,
+  );
+  return payload;
+}
+
+/** Hand the file to the OS: reveal in Finder, or open in the default app. */
+export async function openFile(candidate, { reveal = false } = {}) {
+  return call(
+    '/db/file/open',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: candidate, reveal }),
+    },
+    reveal ? 'reveal file' : 'open file',
+  );
+}
+
+export function short(s, n = 10) {
+  if (!s) return '';
+  return s.length > n * 2 ? `${s.slice(0, n)}…${s.slice(-4)}` : s;
+}
