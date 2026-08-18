@@ -18,6 +18,9 @@ echo "== build =="
 npm run build
 test -f dist/index.html || { echo "FAIL: dist/index.html not produced"; exit 1; }
 
+echo "== tests =="
+npm test
+
 echo "== bridge syntax =="
 node --check server.mjs
 

@@ -81,9 +81,9 @@ export async function schemaDetail(name) {
   return payload.data.schema;
 }
 
-async function query(body, { scan = false, label }) {
+async function query(body, { label }) {
   const payload = await call(
-    `/db/query${scan ? '?scan=1' : ''}`,
+    '/db/query',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -95,39 +95,25 @@ async function query(body, { scan = false, label }) {
 }
 
 /**
- * Level 2b — a page of KEYS in a schema.
+ * Level 2b — a cursor page of live KEYS in a schema.
  *
- * Projects exactly ONE field. The key itself rides on every row's envelope
- * regardless of projection, and each projected field costs its atom metadata on
- * every row, so one field is the cheapest read that can still return rows.
- *
- * `Page` is not key-restricted, so it trips the node's full-scan gate — hence
- * `scan: true`. This is the admin/offline read that gate carves out.
- *
- * Which field is not a free choice. A row is returned only when the projected
- * field resolves to an atom on that row, and a schema's declared key fields are
- * frequently not stored as field atoms at all — the key lives on the envelope.
- * A field that is empty across the schema therefore lists nothing, and because
- * an empty projection expands to the full field set, the widest possible read
- * is the one most likely to come back empty. There is no single projection that
- * lists keys on every schema, and a wide projection is not a safe fallback.
- *
- * `total_count` follows the projection too, so it is a count for the field in
- * use rather than a census of the table.
+ * `/api/list` is the node's keys-only admin enumeration route. It returns
+ * record identities without resolving field atoms, so browse no longer needs
+ * a projection, a full-scan capability header, or a misleading total count.
  */
-export async function keyPage(schemaName, field, { offset, limit }) {
-  return query(
-    {
-      schema_name: schemaName,
-      fields: [field],
-      filter: { Page: { offset, limit } },
-    },
-    { scan: true, label: `keys ${short(schemaName)}.${field} @${offset}` },
+export async function keyList(schemaName, { cursor = null, limit = 100 } = {}) {
+  const qs = new URLSearchParams({ schema: schemaName, limit: String(limit) });
+  if (cursor) qs.set('cursor', cursor);
+  const payload = await call(
+    `/db/list?${qs}`,
+    undefined,
+    `keys ${short(schemaName)}`,
   );
+  return payload.data.list;
 }
 
 /**
- * Candidate projection fields, best first.
+ * Candidate projection fields for keyed LOOKUP, best first.
  *
  * The HASH KEY FIELD leads, and that is not a stylistic choice — the projection
  * decides whether the returned key is usable at all. For one page of rows, only
@@ -142,8 +128,7 @@ export async function keyPage(schemaName, field, { offset, limit }) {
  * from the hash field's own value, so no other field can stand in for it.
  *
  * Hence: hash field, then range field, then data fields as a last resort for
- * schemas whose key fields carry no atoms at all. `keyIsAddressable` marks
- * which of those cases the UI is in.
+ * schemas whose key fields carry no atoms at all.
  */
 export function projectionCandidates(schema) {
   const fields = schema?.fields ?? [];
@@ -152,42 +137,6 @@ export function projectionCandidates(schema) {
   const keyFields = [hashField, rangeField].filter((f) => f && fields.includes(f));
   const nonKey = fields.filter((f) => !keyFields.includes(f));
   return [...keyFields, ...nonKey];
-}
-
-/** Does listing by `field` yield keys that a keyed read can actually address? */
-export function keyIsAddressable(schema, field) {
-  return Boolean(field) && field === schema?.key?.hash_field;
-}
-
-/**
- * Find a projection that actually returns rows, then return that page.
- *
- * Bounded to `maxProbes` reads: on a large schema each attempt is a real scan,
- * and the point is to get the user a usable list without silently spending the
- * node's afternoon. The field that worked is reported back so paging can reuse
- * it instead of re-probing, and so the UI can show what it listed by.
- */
-export async function keyPageProbing(schema, { offset, limit }, maxProbes = 4) {
-  const candidates = projectionCandidates(schema);
-  let last = null;
-  for (const field of candidates.slice(0, maxProbes)) {
-    const data = await keyPage(schema.name, field, { offset, limit });
-    last = { data, field, probed: true };
-    if ((data.results?.length ?? 0) > 0) return last;
-
-    // An empty PAGE is not an empty FIELD. `Page` windows over the whole key
-    // set and only then drops tombstoned keys, so on a heavily deleted schema a
-    // window can land entirely on deleted rows and come back empty while live
-    // rows sit further in.
-    //
-    // Abandoning the field here is the expensive mistake: the next candidate
-    // is a NON-key field, and listing by one of those yields blinded partition
-    // tokens instead of real hashes, so every key it produces is unopenable.
-    // Staying on a sparse-but-addressable field beats moving to a populated
-    // dead-end, so only a field with no keys at all is disqualified.
-    if ((data.total_count ?? 0) > 0) return last;
-  }
-  return last ?? { data: { results: [], total_count: 0 }, field: null, probed: true };
 }
 
 /**
