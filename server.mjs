@@ -7,7 +7,8 @@
 // times, and caches the one call that is genuinely expensive.
 //
 // Read-only by construction: every route below maps to a GET, or to the
-// read-only POST /api/query. There is no path from this bridge to /api/mutation.
+// read-only POST /api/query. Browse uses keys-only GET /api/list. There is no
+// path from this bridge to /api/mutation.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -34,12 +35,10 @@ const DIST = path.join(__dirname, 'dist');
 /**
  * One request to the LastDB node over the unix socket.
  *
- * `allowFullScan` sends X-LastDB-Allow-Full-Scan, which the node gates on: an
- * unfiltered read (Page / SampleN) is refused for product apps and permitted
- * only for admin/offline bulk. A browser IS that admin caller, but the header
- * is passed per-request rather than globally so a keyed read never carries it.
+ * The bridge never sends X-LastDB-Allow-Full-Scan. Browse has a dedicated
+ * keys-only route, and unfiltered queries must keep failing closed.
  */
-function callNode({ method = 'GET', target, body = null, allowFullScan = false }) {
+function callNode({ method = 'GET', target, body = null }) {
   return new Promise((resolve, reject) => {
     const headers = { 'X-LastDB-Client': CLIENT_ID, Accept: 'application/json' };
     let payload = null;
@@ -48,7 +47,6 @@ function callNode({ method = 'GET', target, body = null, allowFullScan = false }
       headers['Content-Type'] = 'application/json';
       headers['Content-Length'] = String(payload.length);
     }
-    if (allowFullScan) headers['X-LastDB-Allow-Full-Scan'] = '1';
 
     const started = Date.now();
     const req = http.request({ socketPath: SOCKET, path: target, method, headers }, (res) => {
@@ -389,20 +387,27 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // --- query -------------------------------------------------------------
+    // --- keys-only cursor page --------------------------------------------
+    if (p === '/db/list') {
+      const qs = new URLSearchParams();
+      for (const name of ['schema', 'limit', 'cursor']) {
+        const value = url.searchParams.get(name);
+        if (value != null && value !== '') qs.set(name, value);
+      }
+      const nodeRes = await callNode({ target: `/api/list?${qs}` });
+      relay(res, nodeRes);
+      return;
+    }
+
+    // --- keyed query -------------------------------------------------------
     if (p === '/db/query' && req.method === 'POST') {
       const body = await readBody(req);
-      // Opt-in per request. Keyed reads (HashKey / HashRangeKey / prefixes) are
-      // the node's supported access pattern and must not carry the scan header;
-      // only the paged catalog browse does.
-      const allowFullScan = url.searchParams.get('scan') === '1';
       const nodeRes = await callNode({
         method: 'POST',
         target: '/api/query',
         body,
-        allowFullScan,
       });
-      relay(res, nodeRes, { full_scan: allowFullScan });
+      relay(res, nodeRes);
       return;
     }
 

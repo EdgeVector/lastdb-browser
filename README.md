@@ -32,10 +32,10 @@ Then open http://127.0.0.1:7666. `npm start` builds the UI and runs the bridge;
 layout, and owning app. A node carries around a thousand seeded schema
 definitions with nothing behind them, so empty ones are behind a toggle.
 
-**2 · Keys.** Either *browse* — a bounded page of keys — or *keyed lookup*, a
-direct `HashKey` / `HashRangeKey` / `HashRangePrefix` read. Lookup is the
-node's supported access pattern and is typically an order of magnitude faster
-than the paged scan.
+**2 · Keys.** Either *browse* — a cursor page from the node's keys-only list
+route — or *keyed lookup*, a direct `HashKey` / `HashRangeKey` /
+`HashRangePrefix` read. Browse resolves no field atoms and does not compute a
+total census; lookup remains the node's O(1) / O(log M) access pattern.
 
 **3 · Record.** One row, every field, with each field's value, type,
 description, atom address, molecule address, and conflict flag.
@@ -72,35 +72,19 @@ with no path to `/api/mutation`.
 |---|---|---|
 | Schemas | `GET /api/schemas?include_counts=true` | Slow (it counts every schema); cached to disk. The only cached read. |
 | Schema shape | `GET /api/schema/{name}` | Field types, descriptions, per-field molecule UUIDs. |
-| Keys — browse | `POST /api/query` with a `Page` filter | Bounded window plus a count. Sends the admin full-scan header. |
+| Keys — browse | `GET /api/list?schema=…&limit=…&cursor=…` | Keys only, cursor-paged, no bodies or scan header. |
 | Keys — lookup | `POST /api/query`, key-restricted | O(1) / O(log M). No scan header. |
 | Record | `POST /api/query`, keyed, all fields | The first read that asks for full width, on one row. |
 | Atom | `GET /api/atom/{uuid}` | The address comes from the record's field metadata, so this is a fetch, not a search. |
 
-## The "list by" picker
+## Browse pagination
 
-Browsing a schema means listing its keys, and on LastDB that requires choosing a
-field to project. The choice is not cosmetic:
-
-- **A row is listed only if the projected field resolves to an atom on it.** A
-  field that is empty across the schema lists nothing, and the widest possible
-  projection is therefore the one most likely to come back empty.
-- **Only the hash key field yields addressable keys.** Project anything else and
-  the node returns the encoded partition token instead of the plaintext hash.
-  Those keys cannot be read back, so records opened from such a listing resolve
-  to nothing.
-- **The reported count follows the projection**, so it is a count for the field
-  in use rather than a census of the table.
-
-So the browser projects the hash key field first, falls back only when that
-field has no keys at all, warns when it has had to fall back, and labels the
-count with the field it counted by. The picker lets you override it.
-
-Two consequences worth knowing while browsing: an empty page does not mean an
-empty field — a page windows over all keys and drops deleted ones afterwards,
-so a window can land entirely on deleted rows while live rows sit further in —
-and a record that will not open is usually a key from a non-hash-field listing
-rather than missing data.
+Browse follows the opaque `next_cursor` returned by `/api/list`; it never turns
+that cursor into an offset and never asks the node for a complete count. The UI
+keeps the cursors it has already visited so Back is local, while Forward sends
+the exact cursor issued by the node. Deleting a record removes its identity from
+the next refreshed list page. Clicking any listed key still performs the normal
+point/range query to hydrate that record.
 
 ## Layout
 
