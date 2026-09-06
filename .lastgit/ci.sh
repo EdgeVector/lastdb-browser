@@ -32,7 +32,7 @@ bash -n bin/lastdb-browser-host-track-post-install
 echo "== venue + inert mirror =="
 # The GitHub copy is a read-only mirror; a workflow directory here would give it
 # something to run.
-test "$(head -n 1 .last-stack/pr-venue)" = "lastgit"
+test "$(head -n 1 .last-stack/pr-venue)" = "forgejo"
 test ! -e .github/workflows
 
 echo "== artifact declaration covers what the launcher needs =="
