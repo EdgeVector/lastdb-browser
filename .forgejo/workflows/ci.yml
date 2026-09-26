@@ -62,6 +62,9 @@ jobs:
             echo "$d" >> "$GITHUB_PATH"
           done
 
+      - name: Install npm dependencies
+        run: npm ci
+
       # The runner forces color into every step; the LastGit watcher never did.
       - name: Merge gate (.lastgit/ci.sh)
         env:
