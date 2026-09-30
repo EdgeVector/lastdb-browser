@@ -1,4 +1,3 @@
-lastgit
-# Gate of record for EdgeVector/lastdb-browser: LastGit (lastdb:///lastdb-browser), Tom era-3 2026-09-26.
-# Forgejo (http://localhost:3300) is now a read-only mirror target for this repo.
-# Decision: decision-2026-09-26-lift-forgejo-venue-block-for-lastgit-era-3.
+github
+# Gate of record for EdgeVector/lastdb-browser: GitHub (https://github.com/EdgeVector/lastdb-browser), since 2026-09-30.
+# LastGit and Forgejo copies are frozen. Decision: decision-2026-09-29-retire-lastgit-all-repos-to-github.

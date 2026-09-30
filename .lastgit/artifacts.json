@@ -11,7 +11,8 @@
         "server.mjs",
         "src",
         "vite.config.js"
-      ]
+      ],
+      "platform": "darwin-arm64"
     }
   ]
 }

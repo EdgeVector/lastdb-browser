@@ -1,0 +1,60 @@
+# Gate of record for EdgeVector/lastdb-browser (GitHub, since 2026-09-30).
+# Brain: decision-2026-09-29-retire-lastgit-all-repos-to-github,
+#        sop-github-artifact-app-migration.
+#
+# `ci-required` is the branch-protection check. It runs .lastgit/ci.sh
+# (npm ci, vite build, node --test) unchanged. `publish` runs on a push to main
+# only, after the gate is green, and uploads the host-track artifact
+# `ht-artifact-<sha>`. `host-track refresh lastdb-browser` on the Mac pulls it
+# (last-stack-github-artifact-pull), re-checks every digest, and promotes stable.
+name: ci-required
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-required-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Merge gate (.lastgit/ci.sh)
+        env:
+          NO_COLOR: "1"
+        run: bash .lastgit/ci.sh
+
+  ci-required:
+    name: ci-required
+    if: ${{ always() }}
+    needs: [test]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every needed job succeeded
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: test "$RESULT" = success
+
+  publish:
+    name: publish
+    needs: [ci-required]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
+    uses: EdgeVector/last-stack/.github/workflows/host-track-artifact.yml@main
+    # Source pack: host-track post-install builds the UI on the Mac
+    # (bin/lastdb-browser-host-track-post-install), so no build step here.

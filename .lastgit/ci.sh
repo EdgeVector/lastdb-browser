@@ -29,11 +29,10 @@ bash -n .lastgit/ci.sh
 bash -n bin/lastdb-browser
 bash -n bin/lastdb-browser-host-track-post-install
 
-echo "== venue + inert mirror =="
-# The GitHub copy is a read-only mirror; a workflow directory here would give it
-# something to run.
-test "$(head -n 1 .last-stack/pr-venue)" = "lastgit"
-test ! -e .github/workflows
+echo "== venue =="
+# GitHub is the gate of record since 2026-09-30.
+test "$(head -n 1 .last-stack/pr-venue)" = "github"
+test -f .github/workflows/ci-required.yml
 
 echo "== artifact declaration covers what the launcher needs =="
 # host-track packs exactly `.lastgit/artifacts.json` paths. If the launcher, the
@@ -45,7 +44,7 @@ for required in README.md bin index.html package.json package-lock.json server.m
 done
 
 echo "== no host identity in shipped tree =="
-# The public mirror must not carry usernames, home paths, emails or private IPs.
+# The public repo must not carry usernames, home paths, emails or private IPs.
 if grep -rnE '/Users/[a-z]|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|192\.168\.|10\.[0-9]+\.[0-9]+\.[0-9]+|100\.[0-9]+\.[0-9]+\.[0-9]+' \
      --include='*.js' --include='*.jsx' --include='*.mjs' --include='*.json' \
      --include='*.md' --include='*.html' --include='*.css' \
