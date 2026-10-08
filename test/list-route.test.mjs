@@ -3,13 +3,12 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import http from 'node:http';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { keyList, keyLookup } from '../src/api.js';
+import { keyList, keyLookup, recordByField } from '../src/api.js';
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -74,8 +73,84 @@ test('keyed lookup remains a POST query without scan opt-in', async () => {
   }
 });
 
+test('recordByField sends one batch query and no per-field queries', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
+    const body = JSON.parse(init.body);
+    const results = body.queries.map((q) => {
+      const field = q.fields[0];
+      if (field === 'gone') {
+        return { status: 400, response: { ok: false, error: 'missing field' } };
+      }
+      if (field === 'empty') {
+        return { status: 200, response: { ok: true, results: [] } };
+      }
+      return {
+        status: 200,
+        response: {
+          ok: true,
+          results: [
+            {
+              key: { hash: 'alpha', range: null },
+              fields: { [field]: `${field}-value` },
+              metadata: { [field]: { atom_uuid: `${field}-atom` } },
+            },
+          ],
+        },
+      };
+    });
+    return {
+      async json() {
+        return { ok: true, data: { ok: true, count: results.length, results } };
+      },
+    };
+  };
+
+  try {
+    const row = await recordByField(
+      'Rows',
+      ['title', 'gone', 'empty', 'body'],
+      { hash: 'alpha' },
+    );
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/db/queries/batch');
+    assert.equal(requests[0].init.method, 'POST');
+    assert.deepEqual(JSON.parse(requests[0].init.body), {
+      queries: [
+        { schema_name: 'Rows', fields: ['title'], filter: { HashKey: 'alpha' } },
+        { schema_name: 'Rows', fields: ['gone'], filter: { HashKey: 'alpha' } },
+        { schema_name: 'Rows', fields: ['empty'], filter: { HashKey: 'alpha' } },
+        { schema_name: 'Rows', fields: ['body'], filter: { HashKey: 'alpha' } },
+      ],
+    });
+    assert.deepEqual(row, {
+      key: { hash: 'alpha' },
+      fields: { title: 'title-value', body: 'body-value' },
+      metadata: {
+        title: { atom_uuid: 'title-atom' },
+        body: { atom_uuid: 'body-atom' },
+      },
+    });
+
+    requests.length = 0;
+    const capped = Array.from({ length: 50 }, (_, i) => `f${i}`);
+    await recordByField('Rows', capped, { hash: 'alpha' });
+    assert.equal(requests.length, 1);
+    assert.equal(JSON.parse(requests[0].init.body).queries.length, 48);
+
+    requests.length = 0;
+    const none = await recordByField('Rows', [], { hash: 'alpha' });
+    assert.equal(none, null);
+    assert.equal(requests.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('bridge proxies list and never grants full-scan capability', async (t) => {
-  const tmp = await mkdtemp(path.join(os.tmpdir(), 'lastdb-browser-list-'));
+  const tmp = await shortTempDir('list');
   const socketPath = path.join(tmp, 'lastdb.sock');
   const nodeRequests = [];
 
@@ -163,6 +238,114 @@ test('bridge proxies list and never grants full-scan capability', async (t) => {
   assert.equal(lookup.data.results[0].key.hash, 'alpha');
   assert.equal(nodeRequests[2].headers['x-lastdb-allow-full-scan'], undefined);
 });
+
+test('recordByField hits the node once via /api/queries/batch', async (t) => {
+  const tmp = await shortTempDir('batch');
+  const socketPath = path.join(tmp, 'lastdb.sock');
+  const nodeRequests = [];
+
+  const fakeNode = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    nodeRequests.push({
+      method: req.method,
+      url: req.url,
+      headers: req.headers,
+      body: Buffer.concat(chunks).toString('utf8'),
+    });
+
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/api/queries/batch') {
+      const body = JSON.parse(nodeRequests.at(-1).body || '{}');
+      const results = (body.queries || []).map((q) => {
+        const field = q.fields[0];
+        return {
+          status: 200,
+          response: {
+            ok: true,
+            results: [
+              {
+                key: { hash: 'alpha', range: 'v1' },
+                fields: { [field]: `${field}-value` },
+                metadata: { [field]: { atom_uuid: `${field}-atom` } },
+              },
+            ],
+          },
+        };
+      });
+      res.end(JSON.stringify({ ok: true, count: results.length, results }));
+      return;
+    }
+
+    res.statusCode = 500;
+    res.end(JSON.stringify({ error: `unexpected ${req.method} ${req.url}` }));
+  });
+  await new Promise((resolve, reject) => {
+    fakeNode.once('error', reject);
+    fakeNode.listen(socketPath, resolve);
+  });
+
+  const port = await availablePort();
+  const bridge = spawn(process.execPath, ['server.mjs'], {
+    cwd: repoRoot,
+    env: { ...process.env, LASTDB_SOCKET: socketPath, PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  t.after(async () => {
+    if (bridge.exitCode == null) bridge.kill('SIGTERM');
+    await new Promise((resolve) => fakeNode.close(resolve));
+  });
+  await waitForBridge(bridge);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    if (typeof url === 'string' && url.startsWith('/')) {
+      return originalFetch(`http://127.0.0.1:${port}${url}`, init);
+    }
+    return originalFetch(url, init);
+  };
+
+  try {
+    const row = await recordByField(
+      'Rows',
+      ['title', 'body', 'author'],
+      { hash: 'alpha', range: 'v1' },
+    );
+    assert.deepEqual(row.fields, {
+      title: 'title-value',
+      body: 'body-value',
+      author: 'author-value',
+    });
+    assert.equal(nodeRequests.length, 1);
+    assert.equal(nodeRequests[0].method, 'POST');
+    assert.equal(nodeRequests[0].url, '/api/queries/batch');
+    assert.equal(nodeRequests[0].headers['x-lastdb-client'], 'lastdb-browser');
+    assert.equal(nodeRequests[0].headers['x-lastdb-allow-full-scan'], undefined);
+    const batchBody = JSON.parse(nodeRequests[0].body);
+    assert.equal(batchBody.queries.length, 3);
+    assert.deepEqual(
+      batchBody.queries.map((q) => q.fields),
+      [['title'], ['body'], ['author']],
+    );
+    assert.deepEqual(batchBody.queries[0].filter, {
+      HashRangeKey: { hash: 'alpha', range: 'v1' },
+    });
+    assert.equal(
+      nodeRequests.filter((r) => r.url === '/api/query').length,
+      0,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+async function shortTempDir(label) {
+  // macOS sockaddr_un.sun_path is 104 bytes. A harness TMPDIR under
+  // ~/.routines/runs/... is already too long for a unix socket, so keep
+  // mock-node sockets under /tmp.
+  return mkdtemp(path.join('/tmp', `ldb-${label}-`));
+}
 
 async function availablePort() {
   const server = net.createServer();

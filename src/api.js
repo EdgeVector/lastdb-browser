@@ -94,6 +94,19 @@ async function query(body, { label }) {
   return payload.data;
 }
 
+async function queryBatch(queries, { label }) {
+  const payload = await call(
+    '/db/queries/batch',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ queries }),
+    },
+    label,
+  );
+  return payload.data;
+}
+
 /**
  * Level 2b — a cursor page of live KEYS in a schema.
  *
@@ -184,29 +197,40 @@ export async function record(schemaName, fields, key) {
  * than an exotic one. Reading each field on its own removes the coupling: a
  * field that has no atom drops itself instead of the record.
  *
- * This is the fallback, not the default: it is N keyed reads instead of one.
- * Keyed reads are the cheap path, and they run concurrently, but the wide read
- * is still strictly better when it works.
+ * This is the fallback, not the default: it is one batch of N keyed queries
+ * (one field per item, same key) instead of one wide read. The node runs the
+ * items independently, so a missing or failed field drops itself. The wide
+ * read is still strictly better when it works. Cap stays at 48 so the node
+ * 64-item batch limit is not hit.
  */
 export async function recordByField(schemaName, fields, key, maxFields = 48) {
   const filter = keyFilter(key);
   const chosen = fields.slice(0, maxFields);
-  const settled = await Promise.all(
-    chosen.map(async (f) => {
-      try {
-        const data = await query(
-          { schema_name: schemaName, fields: [f], filter },
-          { label: `field ${f}` },
-        );
-        return [f, data.results?.[0] ?? null];
-      } catch {
-        return [f, null];
-      }
-    }),
-  );
+  if (chosen.length === 0) return null;
+
+  const queries = chosen.map((f) => ({
+    schema_name: schemaName,
+    fields: [f],
+    filter,
+  }));
+
+  let batch;
+  try {
+    batch = await queryBatch(queries, { label: `record-by-field ${short(key.hash)}` });
+  } catch {
+    return null;
+  }
+
+  const items = batch?.results ?? [];
   const row = { key, fields: {}, metadata: {} };
   let any = false;
-  for (const [f, res] of settled) {
+  for (let i = 0; i < chosen.length; i++) {
+    const f = chosen[i];
+    const item = items[i];
+    // A thrown per-field query used to become [f, null]. A non-200 batch item
+    // is the same: drop the field, keep the rest of the record.
+    if (!item || item.status !== 200) continue;
+    const res = item.response?.results?.[0] ?? null;
     if (!res) continue;
     any = true;
     if (f in (res.fields || {})) row.fields[f] = res.fields[f];

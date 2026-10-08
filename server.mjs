@@ -7,8 +7,8 @@
 // times, and caches the one call that is genuinely expensive.
 //
 // Read-only by construction: every route below maps to a GET, or to the
-// read-only POST /api/query. Browse uses keys-only GET /api/list. There is no
-// path from this bridge to /api/mutation.
+// read-only POST /api/query and POST /api/queries/batch. Browse uses keys-only
+// GET /api/list. There is no path from this bridge to /api/mutation.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -405,6 +405,22 @@ const server = http.createServer(async (req, res) => {
       const nodeRes = await callNode({
         method: 'POST',
         target: '/api/query',
+        body,
+      });
+      relay(res, nodeRes);
+      return;
+    }
+
+    // --- keyed query batch -------------------------------------------------
+    // Independent keyed queries in one node round-trip. The bridge does not
+    // interpret items; the node 64-item cap is the only limit on this path.
+    // recordByField stays at 48 fields so a later cap raise is what would
+    // need chunking, not this route.
+    if (p === '/db/queries/batch' && req.method === 'POST') {
+      const body = await readBody(req);
+      const nodeRes = await callNode({
+        method: 'POST',
+        target: '/api/queries/batch',
         body,
       });
       relay(res, nodeRes);
