@@ -8,8 +8,7 @@
     "dev": "concurrently -n bridge,vite -c cyan,magenta \"node server.mjs\" \"vite\"",
     "bridge": "node server.mjs",
     "build": "vite build",
-    "start": "vite build && node server.mjs",
-    "test": "node --test"
+    "start": "vite build && node server.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

@@ -94,3 +94,5 @@ src/api.js         one function per drill-down step; the hydration policy lives 
 src/useAsync.js    load-on-open with a stale-response guard
 src/components/    SchemaList · KeyList · RecordPane · AtomPane · RequestLog
 ```
+
+The tests are deleted (Tom, 2026-10-09). The gate (`.lastgit/ci.sh`) runs `npm ci`, the build, syntax checks and source checks.
