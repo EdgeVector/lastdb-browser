@@ -48,10 +48,8 @@ function pretty(content) {
 /**
  * Level 4 — the atom.
  *
- * The atom body is fetched as soon as a field is opened, because that is what
- * the click asked for. History and protein binding are NOT: they are separate
- * node round-trips answering questions the user has not asked yet, so each sits
- * behind its own button.
+ * The atom body is fetched when a field is opened. History requires a separate
+ * click and a separate node request.
  *
  * History is scoped by hash/range. A molecule is per-FIELD and shared by every
  * key in the schema, so unscoped history would be the field's history across
@@ -59,7 +57,6 @@ function pretty(content) {
  */
 export default function AtomPane({ schemaDetail, selectedKey, field, meta }) {
   const [wantHistory, setWantHistory] = useState(false);
-  const [wantProtein, setWantProtein] = useState(false);
 
   const atomUuid = meta?.atom_uuid ?? null;
   const moleculeUuid = meta?.molecule_uuid ?? schemaDetail?.field_molecule_uuids?.[field] ?? null;
@@ -67,7 +64,6 @@ export default function AtomPane({ schemaDetail, selectedKey, field, meta }) {
   // A new field is a new question; retract the optional reads.
   useEffect(() => {
     setWantHistory(false);
-    setWantProtein(false);
   }, [atomUuid]);
 
   const atom = useAsync(atomUuid ? () => api.atom(atomUuid) : null, [atomUuid]);
@@ -94,11 +90,6 @@ export default function AtomPane({ schemaDetail, selectedKey, field, meta }) {
   const history = useAsync(
     wantHistory && moleculeUuid ? () => api.history(moleculeUuid, selectedKey) : null,
     [wantHistory, moleculeUuid, selectedKey?.hash, selectedKey?.range],
-  );
-
-  const protein = useAsync(
-    wantProtein && moleculeUuid ? () => api.proteinOfMolecule(moleculeUuid) : null,
-    [wantProtein, moleculeUuid],
   );
 
   if (!field) {
@@ -268,30 +259,6 @@ export default function AtomPane({ schemaDetail, selectedKey, field, meta }) {
           )}
         </div>
 
-        <div className="section">
-          <h3>Protein</h3>
-          {!wantProtein ? (
-            <>
-              <button onClick={() => setWantProtein(true)} disabled={!moleculeUuid}>
-                check binding
-              </button>
-              <div className="note" style={{ marginTop: 6 }}>
-                Whether this field&apos;s molecule is bound into a multi-key protein.
-              </div>
-            </>
-          ) : protein.loading ? (
-            <span className="spin" />
-          ) : protein.error ? (
-            <div className="err" style={{ margin: 0 }}>{protein.error}</div>
-          ) : (
-            <dl className="kv">
-              <dt>protein</dt>
-              <dd style={{ fontSize: 10.5 }}>
-                {protein.data?.protein_uuid ?? 'not bound'}
-              </dd>
-            </dl>
-          )}
-        </div>
       </div>
     </div>
   );

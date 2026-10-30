@@ -263,16 +263,6 @@ export async function history(moleculeUuid, key) {
   return payload.data;
 }
 
-/** Level 4 (optional) — the protein this field's molecule is bound to, if any. */
-export async function proteinOfMolecule(moleculeUuid) {
-  const payload = await call(
-    `/db/protein/of-molecule/${encodeURIComponent(moleculeUuid)}`,
-    undefined,
-    `protein ${short(moleculeUuid)}`,
-  );
-  return payload.data;
-}
-
 /**
  * Does this value name a file that exists on disk?
  *
