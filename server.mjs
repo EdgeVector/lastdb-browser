@@ -454,16 +454,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // --- protein binding for a molecule ------------------------------------
-    if (p.startsWith('/db/protein/of-molecule/')) {
-      const uuid = decodeURIComponent(p.slice('/db/protein/of-molecule/'.length));
-      const nodeRes = await callNode({
-        target: `/api/protein/of-molecule/${encodeURIComponent(uuid)}`,
-      });
-      relay(res, nodeRes, { molecule_uuid: uuid });
-      return;
-    }
-
     // --- source file: does this path exist on disk? ------------------------
     if (p === '/db/file') {
       sendJson(res, 200, await statSourceFile(url.searchParams.get('path')));

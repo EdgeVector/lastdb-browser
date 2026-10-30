@@ -6,11 +6,12 @@ An interactive browser for a local LastDB node. Four columns, four levels:
 schemas ──▶ keys ──▶ record ──▶ atom
 ```
 
-Each level is a single node read, issued when you open that level and not
-before. Opening a schema does not touch its rows; opening a row does not fetch
-its atoms; an atom's history and protein binding sit behind their own buttons.
-A footer logs every node request with its latency and response size, so the
-hydration behaviour is something you can check rather than take on trust.
+Select a schema to read its definition. Select a key to read the record's field values and atom addresses.
+Select a field to fetch its atom details. History requires a separate button.
+The footer shows each request, its latency, and its response size.
+
+Each schema owns its record values. Canonical field reuse supplies definitions only.
+Named alternate keys find the same records through fields declared in that schema.
 
 ## Run
 
@@ -40,8 +41,8 @@ total census; lookup remains the node's O(1) / O(log M) access pattern.
 **3 · Record.** One row, every field, with each field's value, type,
 description, atom address, molecule address, and conflict flag.
 
-**4 · Atom.** The atom body, its addresses, and its timestamps. History and
-protein binding load on request. Files are surfaced here too — see below.
+**4 · Atom.** The atom body, its addresses, and its timestamps. History loads on request.
+The pane also shows files, as described below.
 
 ## Files
 
