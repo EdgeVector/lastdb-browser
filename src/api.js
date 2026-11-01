@@ -239,36 +239,11 @@ export async function recordByField(schemaName, fields, key, maxFields = 48) {
   return any ? row : null;
 }
 
-/** Level 4 — the atom body itself. */
-export async function atom(uuid) {
-  const payload = await call(`/db/atom/${encodeURIComponent(uuid)}`, undefined, `atom ${short(uuid)}`);
-  return payload.data;
-}
-
-/**
- * Level 4 (optional) — prior versions of one field at one key.
- *
- * Scoped by hash/range on purpose: a molecule is per-FIELD and shared by every
- * key in the schema, so an unscoped history read is not this record's history.
- */
-export async function history(moleculeUuid, key) {
-  const qs = new URLSearchParams();
-  if (key?.hash != null) qs.set('hash', key.hash);
-  if (key?.range) qs.set('range', key.range);
-  const payload = await call(
-    `/db/history/${encodeURIComponent(moleculeUuid)}?${qs}`,
-    undefined,
-    `history ${short(moleculeUuid)}`,
-  );
-  return payload.data;
-}
-
 /**
  * Does this value name a file that exists on disk?
  *
- * Called for an atom's `source_file_name` and, when that is absent, for the
- * atom's own body — plenty of schemas keep a path in an ordinary field, and
- * this node populates `source_file_name` on nothing at all.
+ * Called for a field value — plenty of schemas keep a path in an ordinary
+ * field.
  */
 export async function statFile(candidate) {
   if (!candidate) return { exists: false };

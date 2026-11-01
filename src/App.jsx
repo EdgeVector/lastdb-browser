@@ -8,9 +8,10 @@ import AtomPane from './components/AtomPane.jsx';
 import RequestLog from './components/RequestLog.jsx';
 
 /**
- * Four columns, four levels, one node read per level:
+ * Four columns, four levels; the first three are one node read each and the
+ * fourth reuses the record read:
  *
- *   schemas ──▶ keys ──▶ record ──▶ atom
+ *   schemas ──▶ keys ──▶ record ──▶ field
  *
  * Selecting at level N clears N+1 downward, so nothing below the open pane is
  * ever in memory, and nothing below it was ever fetched.
@@ -75,7 +76,7 @@ export default function App() {
         )}
         <span className="spacer" />
         <span className="note">
-          schemas → keys → record → atom · each level fetched on open
+          schemas → keys → record → field · each level fetched on open
         </span>
       </div>
 
@@ -99,9 +100,10 @@ export default function App() {
         />
         <AtomPane
           schemaDetail={detail.data}
-          selectedKey={key}
           field={field}
-          meta={recordMeta?.[field]}
+          meta={recordMeta?.metadata?.[field]}
+          value={recordMeta?.fields?.[field]}
+          present={recordMeta != null && field != null && field in recordMeta.fields}
         />
       </div>
 

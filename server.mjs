@@ -427,33 +427,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // --- atom content ------------------------------------------------------
-    if (p.startsWith('/db/atom/')) {
-      const uuid = decodeURIComponent(p.slice('/db/atom/'.length));
-      const nodeRes = await callNode({ target: `/api/atom/${encodeURIComponent(uuid)}` });
-      relay(res, nodeRes, { atom_uuid: uuid });
-      return;
-    }
-
-    // --- molecule history, scoped to one key -------------------------------
-    if (p.startsWith('/db/history/')) {
-      const uuid = decodeURIComponent(p.slice('/db/history/'.length));
-      const qs = new URLSearchParams();
-      // A molecule is per-FIELD and shared by every key in the schema, so an
-      // unscoped history read is meaningless here; hash/range narrow it to the
-      // record the user is actually looking at.
-      const hash = url.searchParams.get('hash');
-      const range = url.searchParams.get('range');
-      if (hash != null) qs.set('hash', hash);
-      if (range != null && range !== '') qs.set('range', range);
-      const suffix = qs.toString() ? `?${qs}` : '';
-      const nodeRes = await callNode({
-        target: `/api/history/${encodeURIComponent(uuid)}${suffix}`,
-      });
-      relay(res, nodeRes, { molecule_uuid: uuid });
-      return;
-    }
-
     // --- source file: does this path exist on disk? ------------------------
     if (p === '/db/file') {
       sendJson(res, 200, await statSourceFile(url.searchParams.get('path')));

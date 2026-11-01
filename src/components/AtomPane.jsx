@@ -1,12 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import * as api from '../api.js';
 import { useAsync } from '../useAsync.js';
-import { short } from '../api.js';
 
 /**
- * Pull a `$lastdb_file` descriptor out of an atom body, if that is what it is.
+ * Pull a `$lastdb_file` descriptor out of a field value, if that is what it is.
  *
- * The body arrives as a JSON string, so this parses before matching.
+ * The value can arrive as a JSON string, so this parses before matching.
  */
 function lastdbFile(content) {
   if (!content) return null;
@@ -46,35 +45,19 @@ function pretty(content) {
 }
 
 /**
- * Level 4 — the atom.
+ * Level 4 — one field of the open record.
  *
- * The atom body is fetched when a field is opened. History requires a separate
- * click and a separate node request.
- *
- * History is scoped by hash/range. A molecule is per-FIELD and shared by every
- * key in the schema, so unscoped history would be the field's history across
- * the whole table, not this record's.
+ * A format 7 node stores one record per key. A field reply has an empty
+ * `atom_uuid` (decision D7), and the node has no per-field atom route and no
+ * atom history route (removed at API 15). So this pane makes no node request
+ * for the value: it shows the value and the metadata that the record read
+ * already returned. A file stat of the value is the one optional read.
  */
-export default function AtomPane({ schemaDetail, selectedKey, field, meta }) {
-  const [wantHistory, setWantHistory] = useState(false);
-
-  const atomUuid = meta?.atom_uuid ?? null;
+export default function AtomPane({ schemaDetail, field, meta, value, present }) {
   const moleculeUuid = meta?.molecule_uuid ?? schemaDetail?.field_molecule_uuids?.[field] ?? null;
 
-  // A new field is a new question; retract the optional reads.
-  useEffect(() => {
-    setWantHistory(false);
-  }, [atomUuid]);
-
-  const atom = useAsync(atomUuid ? () => api.atom(atomUuid) : null, [atomUuid]);
-
-  // The atom's own file, if it has one. `source_file_name` is the field meant
-  // for this, but it is unset across every schema on this node, so the atom's
-  // body is probed too — schemas that track files tend to keep the path in an
-  // ordinary field, which is the same click from the user's side.
-  const fileCandidate =
-    atom.data?.source_file_name ||
-    (typeof atom.data?.content === 'string' ? atom.data.content : null);
+  // Schemas that track files tend to keep the path in an ordinary field.
+  const fileCandidate = typeof value === 'string' ? value : null;
 
   const file = useAsync(
     fileCandidate ? () => api.statFile(fileCandidate) : null,
@@ -85,25 +68,20 @@ export default function AtomPane({ schemaDetail, selectedKey, field, meta }) {
   // encrypted blob described by a `$lastdb_file` envelope — name, media type,
   // size, `blob_ref`, and the DEK. Raw, that JSON is unreadable; named, it is
   // the most useful thing on the pane.
-  const blob = lastdbFile(atom.data?.content);
-
-  const history = useAsync(
-    wantHistory && moleculeUuid ? () => api.history(moleculeUuid, selectedKey) : null,
-    [wantHistory, moleculeUuid, selectedKey?.hash, selectedKey?.range],
-  );
+  const blob = lastdbFile(value);
 
   if (!field) {
     return (
       <div className="col col-atom">
         <div className="col-head">
-          <div className="col-title">4 · Atom</div>
+          <div className="col-title">4 · Field</div>
         </div>
         <div className="empty">
-          Click a field to fetch its atom.
+          Click a field to show its value.
           <br />
           <br />
-          Each field of a record resolves to one atom; the record read already
-          carries the atom&apos;s address, so this is a direct fetch.
+          The record read already carries every field value and its metadata,
+          so this pane makes no node request.
         </div>
       </div>
     );
@@ -113,15 +91,12 @@ export default function AtomPane({ schemaDetail, selectedKey, field, meta }) {
     <div className="col col-atom">
       <div className="col-head">
         <div className="col-title">
-          <span>4 · Atom</span>
-          {atom.loading && <span className="spin" />}
+          <span>4 · Field</span>
         </div>
         <div className="row-name" style={{ marginTop: 5, fontWeight: 600 }}>
           {field}
         </div>
       </div>
-
-      {atom.error && <div className="err">{atom.error}</div>}
 
       <div className="col-body">
         {blob && (
@@ -148,32 +123,18 @@ export default function AtomPane({ schemaDetail, selectedKey, field, meta }) {
 
         <div className="section" style={blob ? undefined : { borderTop: 'none' }}>
           <h3>{blob ? 'Raw content' : 'Content'}</h3>
-          <pre className="atom-body">{atom.loading ? '…' : pretty(atom.data?.content)}</pre>
+          <pre className="atom-body">{present ? pretty(value) : '—'}</pre>
         </div>
 
         <div className="section">
           <h3>Addresses</h3>
           <dl className="kv">
-            <dt>atom</dt>
-            <dd style={{ fontSize: 10.5 }}>{atomUuid}</dd>
             <dt>molecule</dt>
             <dd style={{ fontSize: 10.5 }}>{moleculeUuid}</dd>
             {meta?.molecule_version != null && (
               <>
                 <dt>version</dt>
                 <dd>{meta.molecule_version}</dd>
-              </>
-            )}
-            {atom.data?.created_at && (
-              <>
-                <dt>created</dt>
-                <dd>{new Date(atom.data.created_at).toLocaleString()}</dd>
-              </>
-            )}
-            {atom.data?.source_file_name && (
-              <>
-                <dt>source file</dt>
-                <dd>{atom.data.source_file_name}</dd>
               </>
             )}
             {file.data?.exists && (
@@ -223,41 +184,6 @@ export default function AtomPane({ schemaDetail, selectedKey, field, meta }) {
             )}
           </div>
         )}
-
-        <div className="section">
-          <h3>History</h3>
-          {!wantHistory ? (
-            <>
-              <button onClick={() => setWantHistory(true)} disabled={!moleculeUuid}>
-                load history
-              </button>
-              <div className="note" style={{ marginTop: 6 }}>
-                Prior versions of this field at this key. Separate read — not fetched
-                unless asked.
-              </div>
-            </>
-          ) : history.loading ? (
-            <span className="spin" />
-          ) : history.error ? (
-            <div className="err" style={{ margin: 0 }}>{history.error}</div>
-          ) : (history.data?.events?.length ?? 0) === 0 ? (
-            <div className="note">No prior versions recorded at this key.</div>
-          ) : (
-            history.data.events.map((ev, i) => (
-              <div key={i} style={{ padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
-                <div className="mono" style={{ fontSize: 11 }}>
-                  {short(ev.atom_uuid || ev.uuid || '', 12)}
-                </div>
-                <div className="field-desc">
-                  {ev.created_at ? new Date(ev.created_at).toLocaleString() : ''}
-                </div>
-                <div className="field-val" style={{ maxHeight: 80 }}>
-                  {pretty(ev.content)}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
 
       </div>
     </div>

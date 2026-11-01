@@ -8,6 +8,10 @@ import React, { useMemo, useState } from 'react';
  * the ~138 that are actually yours. The toggle keeps the empty ones reachable
  * without making them the default view.
  *
+ * A format 7 node sends `record_count: null` and `has_data: null` for a schema
+ * it did not count (an unfiltered count fails above 10,000 records). Unknown is
+ * not empty, so such a schema stays in the default view and shows "?".
+ *
  * Nothing below this level is touched here — no shape, no molecules, no rows.
  */
 export default function SchemaList({ catalog, loading, error, selected, onSelect, onRefresh }) {
@@ -19,7 +23,7 @@ export default function SchemaList({ catalog, loading, error, selected, onSelect
   const rows = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     return all
-      .filter((s) => (showEmpty ? true : s.has_data === true))
+      .filter((s) => (showEmpty ? true : s.has_data !== false))
       .filter((s) => {
         if (!needle) return true;
         return (
@@ -36,7 +40,7 @@ export default function SchemaList({ catalog, loading, error, selected, onSelect
       });
   }, [all, filter, showEmpty]);
 
-  const withData = all.filter((s) => s.has_data === true).length;
+  const withData = all.filter((s) => s.has_data !== false).length;
 
   return (
     <div className="col col-schemas">
@@ -94,7 +98,7 @@ export default function SchemaList({ catalog, loading, error, selected, onSelect
           >
             <div className="row-main">
               <span className="row-name">{s.descriptive_name || s.name}</span>
-              <span className="count">{s.record_count ?? '—'}</span>
+              <span className="count">{countText(s)}</span>
             </div>
             <div className="row-sub">
               <span className={`badge${s.schema_type === 'HashRange' ? ' hr' : ''}`}>
@@ -111,10 +115,15 @@ export default function SchemaList({ catalog, loading, error, selected, onSelect
       {catalog && (
         <div className="pager">
           <span>
-            {withData} with data · counted {new Date(catalog.fetched_at).toLocaleTimeString()}
+            {withData} with data or uncounted · counted {new Date(catalog.fetched_at).toLocaleTimeString()}
           </span>
         </div>
       )}
     </div>
   );
+}
+
+function countText(s) {
+  if (s.record_count != null) return s.record_count;
+  return s.has_data == null ? '?' : '—';
 }

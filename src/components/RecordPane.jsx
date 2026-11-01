@@ -16,9 +16,10 @@ function renderValue(v) {
  * happens only after a specific key has been clicked. It is a keyed read
  * (HashKey / HashRangeKey), so the width is paid on exactly one row.
  *
- * The response's per-field `metadata` — atom_uuid, molecule_uuid, version,
- * has_conflicts — is what makes level 4 a direct fetch: the atom pane never has
- * to search for the atom behind a field, it already has its address.
+ * The response's per-field `metadata` — molecule_uuid, version, has_conflicts —
+ * goes to the field pane with the value itself. A format 7 node stores one
+ * record per key, so `atom_uuid` is empty and no per-field atom route exists:
+ * the record read is the whole read.
  */
 export default function RecordPane({
   schema,
@@ -49,10 +50,10 @@ export default function RecordPane({
   const data = result.data?.row ?? null;
   const readMode = result.data?.mode ?? null;
 
-  // Hand the per-field atom addresses to the atom pane. They arrive with the
-  // record read, so level 4 costs one fetch of the body — never a lookup.
+  // Hand the per-field metadata and values to the field pane. They arrive with
+  // the record read, so level 4 needs no node request.
   useEffect(() => {
-    onMeta?.(data?.metadata ?? null);
+    onMeta?.(data ? { metadata: data.metadata ?? {}, fields: data.fields ?? {} } : null);
   }, [data, onMeta]);
 
   if (!schema) {
@@ -177,7 +178,7 @@ export default function RecordPane({
         {selectedKey && data && readMode === 'per-field' && (
           <div className="note" style={{ padding: '7px 10px', borderBottom: '1px solid var(--border)' }}>
             Rebuilt field by field — the combined read returned nothing, so at
-            least one field has no atom at this key.
+            least one field has no value at this key.
           </div>
         )}
 
@@ -190,8 +191,8 @@ export default function RecordPane({
               <div
                 key={f}
                 className={`field${selectedField === f ? ' sel' : ''}`}
-                onClick={() => meta?.atom_uuid && onSelectField(f)}
-                style={meta?.atom_uuid ? undefined : { cursor: 'default', opacity: 0.55 }}
+                onClick={() => present && onSelectField(f)}
+                style={present ? undefined : { cursor: 'default', opacity: 0.55 }}
               >
                 <div className="field-head">
                   <span className="field-name">{f}</span>
@@ -202,11 +203,9 @@ export default function RecordPane({
                   )}
                 </div>
                 <div className="field-val">
-                  {present ? renderValue(data.fields[f]) : <em style={{ opacity: 0.6 }}>no atom</em>}
+                  {present ? renderValue(data.fields[f]) : <em style={{ opacity: 0.6 }}>no value</em>}
                 </div>
-                {meta?.atom_uuid && (
-                  <div className="field-desc mono">atom {short(meta.atom_uuid, 12)} →</div>
-                )}
+                {present && <div className="field-desc mono">field →</div>}
               </div>
             );
           })}
