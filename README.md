@@ -3,11 +3,11 @@
 An interactive browser for a local LastDB node. Four columns, four levels:
 
 ```
-schemas ──▶ keys ──▶ record ──▶ atom
+schemas ──▶ keys ──▶ record ──▶ field
 ```
 
-Select a schema to read its definition. Select a key to read the record's field values and atom addresses.
-Select a field to fetch its atom details. History requires a separate button.
+Select a schema to read its definition. Select a key to read the record's field values and metadata.
+Select a field to show its value, its file, and its molecule address. This step sends no node request.
 The footer shows each request, its latency, and its response size.
 
 Each schema owns its record values. Canonical field reuse supplies definitions only.
@@ -32,21 +32,26 @@ Then open http://127.0.0.1:7666. `npm start` builds the UI and runs the bridge;
 **1 · Schemas.** Lists schemas that hold data, with their record counts, key
 layout, and owning app. A node carries around a thousand seeded schema
 definitions with nothing behind them, so empty ones are behind a toggle.
+A node can return a null `record_count` (and a null `has_data`) when it cannot
+count a schema. The list shows that schema with the count `?`; it does not hide it.
 
 **2 · Keys.** Either *browse* — a cursor page from the node's keys-only list
 route — or *keyed lookup*, a direct `HashKey` / `HashRangeKey` /
 `HashRangePrefix` read. Browse resolves no field atoms and does not compute a
 total census; lookup remains the node's O(1) / O(log M) access pattern.
 
-**3 · Record.** One row, every field, with each field's value, type,
-description, atom address, molecule address, and conflict flag.
+**3 · Record.** One record, every field, with each field's value, type,
+description, molecule address, and conflict flag.
 
-**4 · Atom.** The atom body, its addresses, and its timestamps. History loads on request.
-The pane also shows files, as described below.
+**4 · Field.** The value of one field from the record read, its molecule address,
+its version, and its conflict flag. The pane also shows files, as described below.
+A format 7 node stores one record per key. A field reply has an empty `atom_uuid`,
+and the node has no atom route and no atom history route (removed at API 15).
+So this level reads nothing more from the node.
 
 ## Files
 
-An atom can point at a file two ways, and the pane handles both.
+A field value can point at a file two ways, and the pane handles both.
 
 A **filesystem path** gets *Open*, *Reveal in Finder*, and *Copy path*. The path
 is checked against disk first, and the buttons appear only if it resolves. Paths
@@ -76,7 +81,7 @@ with no path to `/api/mutation`.
 | Keys — browse | `GET /api/list?schema=…&limit=…&cursor=…` | Keys only, cursor-paged, no bodies or scan header. |
 | Keys — lookup | `POST /api/query`, key-restricted | O(1) / O(log M). No scan header. |
 | Record | `POST /api/query`, keyed, all fields | The first read that asks for full width, on one row. |
-| Atom | `GET /api/atom/{uuid}` | The address comes from the record's field metadata, so this is a fetch, not a search. |
+| Field | none | The value and metadata come from the record read. |
 
 ## Browse pagination
 
