@@ -4,7 +4,7 @@ import { useAsync } from './useAsync.js';
 import SchemaList from './components/SchemaList.jsx';
 import KeyList from './components/KeyList.jsx';
 import RecordPane from './components/RecordPane.jsx';
-import AtomPane from './components/AtomPane.jsx';
+import FieldPane from './components/FieldPane.jsx';
 import RequestLog from './components/RequestLog.jsx';
 
 /**
@@ -41,7 +41,7 @@ export default function App() {
     loadCatalog(false);
   }, [loadCatalog]);
 
-  // The schema's shape — field types, descriptions, per-field molecule UUIDs.
+  // The schema's shape — field types, descriptions, field key ids.
   // One small read, fetched when a schema is opened and not before.
   const detail = useAsync(
     schema ? () => api.schemaDetail(schema.name) : null,
@@ -98,10 +98,10 @@ export default function App() {
           onSelectField={setField}
           onMeta={setRecordMeta}
         />
-        <AtomPane
+        <FieldPane
           schemaDetail={detail.data}
           field={field}
-          meta={recordMeta?.metadata?.[field]}
+          conflicted={recordMeta?.conflictedFields?.includes(field) ?? false}
           value={recordMeta?.fields?.[field]}
           present={recordMeta != null && field != null && field in recordMeta.fields}
         />

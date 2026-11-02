@@ -146,7 +146,7 @@ async function getCatalog({ refresh = false } = {}) {
 // source files
 // ---------------------------------------------------------------------------
 //
-// An atom can name the file it came from (`source_file_name`), and plenty of
+// A record can name the file it came from (`source_file_name`), and plenty of
 // schemas keep a path in an ordinary field. Either way the value is DATA read
 // out of the database, so it is treated as untrusted for the whole of this
 // section: it is never interpolated into a shell, and it is checked against the
@@ -375,7 +375,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // --- one schema's shape (fields, types, per-field molecule uuids) -------
+    // --- one schema's shape (fields, types, field key ids) -----------------
     if (p.startsWith('/db/schema/')) {
       const name = decodeURIComponent(p.slice('/db/schema/'.length));
       // The node matches the schema name as a single path segment, so a name

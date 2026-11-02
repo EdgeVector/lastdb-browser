@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Interactive data browser for a local LastDB node: schemas -> keys -> records -> atoms.",
+  "description": "Interactive data browser for a local LastDB node: schemas -> keys -> records -> fields.",
   "scripts": {
     "dev": "concurrently -n bridge,vite -c cyan,magenta \"node server.mjs\" \"vite\"",
     "bridge": "node server.mjs",

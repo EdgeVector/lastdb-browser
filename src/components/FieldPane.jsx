@@ -47,14 +47,14 @@ function pretty(content) {
 /**
  * Level 4 — one field of the open record.
  *
- * A format 7 node stores one record per key. A field reply has an empty
- * `atom_uuid` (decision D7), and the node has no per-field atom route and no
- * atom history route (removed at API 15). So this pane makes no node request
- * for the value: it shows the value and the metadata that the record read
- * already returned. A file stat of the value is the one optional read.
+ * The node stores one record per key. A field has no metadata of its own: the
+ * record has one metadata block and names its conflicted fields. So this pane
+ * makes no node request for the value: it shows the value that the record read
+ * already returned, the field key from the schema, and the record's conflict
+ * flag for this field. A file stat of the value is the one optional read.
  */
-export default function AtomPane({ schemaDetail, field, meta, value, present }) {
-  const moleculeUuid = meta?.molecule_uuid ?? schemaDetail?.field_molecule_uuids?.[field] ?? null;
+export default function FieldPane({ schemaDetail, field, conflicted, value, present }) {
+  const fieldKeyId = schemaDetail?.field_key_ids?.[field] ?? null;
 
   // Schemas that track files tend to keep the path in an ordinary field.
   const fileCandidate = typeof value === 'string' ? value : null;
@@ -72,7 +72,7 @@ export default function AtomPane({ schemaDetail, field, meta, value, present }) 
 
   if (!field) {
     return (
-      <div className="col col-atom">
+      <div className="col col-field">
         <div className="col-head">
           <div className="col-title">4 · Field</div>
         </div>
@@ -80,15 +80,15 @@ export default function AtomPane({ schemaDetail, field, meta, value, present }) 
           Click a field to show its value.
           <br />
           <br />
-          The record read already carries every field value and its metadata,
-          so this pane makes no node request.
+          The record read already carries every field value and the record
+          metadata, so this pane makes no node request.
         </div>
       </div>
     );
   }
 
   return (
-    <div className="col col-atom">
+    <div className="col col-field">
       <div className="col-head">
         <div className="col-title">
           <span>4 · Field</span>
@@ -123,30 +123,24 @@ export default function AtomPane({ schemaDetail, field, meta, value, present }) 
 
         <div className="section" style={blob ? undefined : { borderTop: 'none' }}>
           <h3>{blob ? 'Raw content' : 'Content'}</h3>
-          <pre className="atom-body">{present ? pretty(value) : '—'}</pre>
+          <pre className="field-content">{present ? pretty(value) : '—'}</pre>
         </div>
 
         <div className="section">
           <h3>Addresses</h3>
           <dl className="kv">
-            <dt>molecule</dt>
-            <dd style={{ fontSize: 10.5 }}>{moleculeUuid}</dd>
-            {meta?.molecule_version != null && (
-              <>
-                <dt>version</dt>
-                <dd>{meta.molecule_version}</dd>
-              </>
-            )}
+            <dt>field key</dt>
+            <dd style={{ fontSize: 10.5 }}>{fieldKeyId}</dd>
             {file.data?.exists && (
               <>
                 <dt>on disk</dt>
                 <dd>{formatBytes(file.data.size)}</dd>
               </>
             )}
-            {meta?.has_conflicts && (
+            {conflicted && (
               <>
                 <dt>conflicts</dt>
-                <dd style={{ color: 'var(--warn)' }}>yes — sibling tips at this key</dd>
+                <dd style={{ color: 'var(--warn)' }}>yes — the record keeps a losing value of this field</dd>
               </>
             )}
           </dl>

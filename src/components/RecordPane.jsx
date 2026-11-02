@@ -16,10 +16,11 @@ function renderValue(v) {
  * happens only after a specific key has been clicked. It is a keyed read
  * (HashKey / HashRangeKey), so the width is paid on exactly one row.
  *
- * The response's per-field `metadata` — molecule_uuid, version, has_conflicts —
- * goes to the field pane with the value itself. A format 7 node stores one
- * record per key, so `atom_uuid` is empty and no per-field atom route exists:
- * the record read is the whole read.
+ * The node stores one record per key, so the record read is the whole read.
+ * The record carries one metadata block and its conflict flag:
+ * `has_conflicts` (true, false, or "unknown") and, when true,
+ * `conflicted_fields`. The values and the conflicted fields go to the field
+ * pane.
  */
 export default function RecordPane({
   schema,
@@ -50,10 +51,10 @@ export default function RecordPane({
   const data = result.data?.row ?? null;
   const readMode = result.data?.mode ?? null;
 
-  // Hand the per-field metadata and values to the field pane. They arrive with
-  // the record read, so level 4 needs no node request.
+  // Hand the values and the conflicted fields to the field pane. They arrive
+  // with the record read, so level 4 needs no node request.
   useEffect(() => {
-    onMeta?.(data ? { metadata: data.metadata ?? {}, fields: data.fields ?? {} } : null);
+    onMeta?.(data ? { fields: data.fields ?? {}, conflictedFields: data.conflicted_fields ?? [] } : null);
   }, [data, onMeta]);
 
   if (!schema) {
@@ -65,7 +66,7 @@ export default function RecordPane({
         <div className="empty">
           <strong>LastDB Browser</strong>
           <br />
-          Schemas → keys → record → atoms. Each level is fetched only when you open it.
+          Schemas → keys → record → field. Each level is fetched only when you open it.
         </div>
       </div>
     );
@@ -148,9 +149,9 @@ export default function RecordPane({
                   {detail?.field_descriptions?.[f] && (
                     <div className="field-desc">{detail.field_descriptions[f]}</div>
                   )}
-                  {detail?.field_molecule_uuids?.[f] && (
+                  {detail?.field_key_ids?.[f] && (
                     <div className="field-desc mono">
-                      molecule {short(detail.field_molecule_uuids[f], 12)}
+                      field key {short(detail.field_key_ids[f], 12)}
                     </div>
                   )}
                 </div>
@@ -166,7 +167,7 @@ export default function RecordPane({
             Nothing resolved at that key.
             <br />
             <br />
-            Neither a wide read nor a field-by-field read returned an atom here.
+            Neither a wide read nor a field-by-field read returned a value here.
             The most common cause is that the key list was projected on a field
             other than <code>{schema.key?.hash_field}</code>, in which case the
             node reports the encoded partition token instead of the real hash —
@@ -185,7 +186,7 @@ export default function RecordPane({
         {selectedKey &&
           data &&
           fields.map((f) => {
-            const meta = data.metadata?.[f];
+            const conflicted = data.conflicted_fields?.includes(f) ?? false;
             const present = f in (data.fields || {});
             return (
               <div
@@ -197,10 +198,7 @@ export default function RecordPane({
                 <div className="field-head">
                   <span className="field-name">{f}</span>
                   <span className="field-type">{typeName(detail?.field_types?.[f])}</span>
-                  {meta?.has_conflicts && <span className="badge conflict">conflict</span>}
-                  {meta?.molecule_version != null && (
-                    <span className="badge">v{meta.molecule_version}</span>
-                  )}
+                  {conflicted && <span className="badge conflict">conflict</span>}
                 </div>
                 <div className="field-val">
                   {present ? renderValue(data.fields[f]) : <em style={{ opacity: 0.6 }}>no value</em>}

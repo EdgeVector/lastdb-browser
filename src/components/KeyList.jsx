@@ -10,7 +10,7 @@ const PAGE_SIZES = [25, 50, 100, 250];
  * Two ways in, and the difference matters enough to show it in the UI:
  *
  *  · BROWSE is a cursor page from the node's keys-only `/api/list` route. It
- *    does not hydrate field atoms, compute a census, or carry a scan header.
+ *    does not read field values, compute a census, or carry a scan header.
  *
  *  · LOOKUP is the node's real access pattern — HashKey for a partition,
  *    HashRangeKey for a record, HashRangePrefix for a slice of one partition.
