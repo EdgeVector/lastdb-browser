@@ -2,7 +2,7 @@
 # Launcher for the LastDB Browser.
 #
 # Starts the bridge (which also serves the built UI) and opens a browser at it.
-# Installed by host-track and symlinked onto PATH, so this resolves its own
+# Installed from the app registry and symlinked onto PATH, so this resolves its own
 # install root rather than assuming a checkout.
 set -euo pipefail
 
@@ -29,7 +29,7 @@ fi
 
 if [ ! -f "$APP_ROOT/dist/index.html" ]; then
   echo "lastdb-browser: UI not built at $APP_ROOT/dist" >&2
-  echo "  Run: host-track refresh lastdb-browser" >&2
+  echo "  Run: lastdb app upgrade lastdb-browser" >&2
   exit 1
 fi
 
