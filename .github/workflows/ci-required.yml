@@ -4,8 +4,8 @@
 #
 # `ci-required` is the branch-protection check. It runs .lastgit/ci.sh
 # (npm ci, vite build, syntax and source checks) unchanged. `publish` runs on a push to main
-# only, after the gate is green, and uploads the host-track artifact
-# `ht-artifact-<sha>`. `host-track refresh lastdb-browser` on the Mac pulls it
+# only, after the gate is green, and uploads the app registry artifact
+# `ht-artifact-<sha>`. `app registry refresh lastdb-browser` on the Mac pulls it
 # (last-stack-github-artifact-pull), re-checks every digest, and promotes stable.
 name: ci-required
 
@@ -55,9 +55,9 @@ jobs:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     permissions:
       contents: read
-    uses: EdgeVector/last-stack/.github/workflows/host-track-artifact.yml@main
-    # Source pack: host-track post-install builds the UI on the Mac
-    # (bin/lastdb-browser-host-track-post-install), so no build step here.
+    uses: EdgeVector/last-stack/.github/workflows/registry-app-package.yml@main
+    # Source pack: app registry post-install builds the UI on the Mac
+    # (bin/lastdb-browser-app registry-post-install), so no build step here.
 
   registry-commit:
     name: Registry commit identity
