@@ -49,16 +49,6 @@ jobs:
           RESULT: ${{ needs.gate.result }}
         run: test "$RESULT" = success
 
-  publish:
-    name: publish
-    needs: [ci-required]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    permissions:
-      contents: read
-    uses: EdgeVector/last-stack/.github/workflows/registry-app-package.yml@main
-    # Source pack: app registry post-install builds the UI on the Mac
-    # (bin/lastdb-browser-app registry-post-install), so no build step here.
-
   registry-commit:
     name: Registry commit identity
     needs: [ci-required]
