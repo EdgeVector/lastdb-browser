@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# host-track post_install for lastdb-browser.
+# Registry source preparation for lastdb-browser.
 #
 # The artifact ships source, not build output, so the UI is built here — the
 # same shape `search` uses. The bridge itself has no runtime dependencies, so

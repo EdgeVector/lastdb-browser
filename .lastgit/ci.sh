@@ -24,7 +24,7 @@ node --check server.mjs
 echo "== shell entrypoints parse =="
 bash -n .lastgit/ci.sh
 bash -n bin/lastdb-browser
-bash -n bin/lastdb-browser-host-track-post-install
+bash -n bin/lastdb-browser-registry-prepare
 
 echo "== venue =="
 # GitHub is the gate of record since 2026-09-30.
