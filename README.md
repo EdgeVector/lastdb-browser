@@ -7,7 +7,7 @@ schemas ──▶ keys ──▶ record ──▶ field
 ```
 
 Select a schema to read its definition. Select a key to read the record's field values and metadata.
-Select a field to show its value, its file, and its molecule address. This step sends no node request.
+Select a field to show its value, its file, and its field key. This step sends no node request.
 The footer shows each request, its latency, and its response size.
 
 Each schema owns its record values. Canonical field reuse supplies definitions only.
@@ -37,16 +37,16 @@ count a schema. The list shows that schema with the count `?`; it does not hide 
 
 **2 · Keys.** Either *browse* — a cursor page from the node's keys-only list
 route — or *keyed lookup*, a direct `HashKey` / `HashRangeKey` /
-`HashRangePrefix` read. Browse resolves no field atoms and does not compute a
+`HashRangePrefix` read. Browse reads no field values and does not compute a
 total census; lookup remains the node's O(1) / O(log M) access pattern.
 
 **3 · Record.** One record, every field, with each field's value, type,
-description, molecule address, and conflict flag.
+description, field key, and conflict flag. The record carries one metadata block
+and `has_conflicts`; when it is true, `conflicted_fields` names the fields.
 
-**4 · Field.** The value of one field from the record read, its molecule address,
-its version, and its conflict flag. The pane also shows files, as described below.
-A format 7 node stores one record per key. A field reply has an empty `atom_uuid`,
-and the node has no atom route and no atom history route (removed at API 15).
+**4 · Field.** The value of one field from the record read, its field key from
+the schema, and its conflict flag. The pane also shows files, as described below.
+The node stores one record per key, and a field has no metadata of its own.
 So this level reads nothing more from the node.
 
 ## Files
@@ -77,11 +77,11 @@ with no path to `/api/mutation`.
 | Level | Node call | Notes |
 |---|---|---|
 | Schemas | `GET /api/schemas?include_counts=true` | Slow (it counts every schema); cached to disk. The only cached read. |
-| Schema shape | `GET /api/schema/{name}` | Field types, descriptions, per-field molecule UUIDs. |
+| Schema shape | `GET /api/schema/{name}` | Field types, descriptions, field key ids. |
 | Keys — browse | `GET /api/list?schema=…&limit=…&cursor=…` | Keys only, cursor-paged, no bodies or scan header. |
 | Keys — lookup | `POST /api/query`, key-restricted | O(1) / O(log M). No scan header. |
 | Record | `POST /api/query`, keyed, all fields | The first read that asks for full width, on one row. |
-| Field | none | The value and metadata come from the record read. |
+| Field | none | The value and the conflict flag come from the record read. |
 
 ## Browse pagination
 
@@ -98,7 +98,7 @@ point/range query to hydrate that record.
 server.mjs         bridge: socket forwarding, schema-catalog cache, file access, static serving
 src/api.js         one function per drill-down step; the hydration policy lives here
 src/useAsync.js    load-on-open with a stale-response guard
-src/components/    SchemaList · KeyList · RecordPane · AtomPane · RequestLog
+src/components/    SchemaList · KeyList · RecordPane · FieldPane · RequestLog
 ```
 
 The tests are deleted (Tom, 2026-10-09). The gate (`.lastgit/ci.sh`) runs `npm ci`, the build, syntax checks and source checks.

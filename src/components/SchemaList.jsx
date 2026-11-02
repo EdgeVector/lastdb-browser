@@ -12,7 +12,7 @@ import React, { useMemo, useState } from 'react';
  * it did not count (an unfiltered count fails above 10,000 records). Unknown is
  * not empty, so such a schema stays in the default view and shows "?".
  *
- * Nothing below this level is touched here — no shape, no molecules, no rows.
+ * Nothing below this level is touched here — no shape, no keys, no records.
  */
 export default function SchemaList({ catalog, loading, error, selected, onSelect, onRefresh }) {
   const [filter, setFilter] = useState('');

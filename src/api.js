@@ -70,7 +70,7 @@ export async function schemas({ refresh = false } = {}) {
 
 /**
  * Level 2a — one schema's shape: field types, descriptions, key layout, and the
- * per-field molecule UUIDs. Fetched only when a schema is opened.
+ * field key ids. Fetched only when a schema is opened.
  */
 export async function schemaDetail(name) {
   const payload = await call(
@@ -111,7 +111,7 @@ async function queryBatch(queries, { label }) {
  * Level 2b — a cursor page of live KEYS in a schema.
  *
  * `/api/list` is the node's keys-only admin enumeration route. It returns
- * record identities without resolving field atoms, so browse no longer needs
+ * record identities without reading field values, so browse no longer needs
  * a projection, a full-scan capability header, or a misleading total count.
  */
 export async function keyList(schemaName, { cursor = null, limit = 100 } = {}) {
@@ -141,7 +141,7 @@ export async function keyList(schemaName, { cursor = null, limit = 100 } = {}) {
  * from the hash field's own value, so no other field can stand in for it.
  *
  * Hence: hash field, then range field, then data fields as a last resort for
- * schemas whose key fields carry no atoms at all.
+ * schemas whose key fields carry no values at all.
  */
 export function projectionCandidates(schema) {
   const fields = schema?.fields ?? [];
@@ -170,9 +170,9 @@ export async function keyLookup(schemaName, keyFields, filter) {
 /**
  * Level 3 — one record, hydrated.
  *
- * Now, and only now, do we ask for every field. The response carries per-field
- * metadata (atom_uuid, molecule_uuid, version, conflict flag), which is what
- * makes level 4 a direct fetch rather than a search.
+ * Now, and only now, do we ask for every field. The response carries the
+ * record metadata block and the record conflict flag (`has_conflicts` and
+ * `conflicted_fields`), so level 4 needs no read of its own.
  */
 export function keyFilter(key) {
   return key.range == null || key.range === ''
@@ -195,7 +195,7 @@ export async function record(schemaName, fields, key) {
  * it, so a single missing field blanks the whole record — and on a schema that
  * has gained fields over time, that is the normal case for older rows rather
  * than an exotic one. Reading each field on its own removes the coupling: a
- * field that has no atom drops itself instead of the record.
+ * field that has no value drops itself instead of the record.
  *
  * This is the fallback, not the default: it is one batch of N keyed queries
  * (one field per item, same key) instead of one wide read. The node runs the
@@ -222,7 +222,7 @@ export async function recordByField(schemaName, fields, key, maxFields = 48) {
   }
 
   const items = batch?.results ?? [];
-  const row = { key, fields: {}, metadata: {} };
+  const row = { key, fields: {}, metadata: null, conflicted_fields: [] };
   let any = false;
   for (let i = 0; i < chosen.length; i++) {
     const f = chosen[i];
@@ -234,7 +234,11 @@ export async function recordByField(schemaName, fields, key, maxFields = 48) {
     if (!res) continue;
     any = true;
     if (f in (res.fields || {})) row.fields[f] = res.fields[f];
-    if (res.metadata?.[f]) row.metadata[f] = res.metadata[f];
+    // The record has one metadata block; each per-field read returns it.
+    if (res.metadata) row.metadata = res.metadata;
+    for (const name of res.conflicted_fields ?? []) {
+      if (!row.conflicted_fields.includes(name)) row.conflicted_fields.push(name);
+    }
   }
   return any ? row : null;
 }
