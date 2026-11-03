@@ -48,12 +48,11 @@ function pretty(content) {
  * Level 4 — one field of the open record.
  *
  * The node stores one record per key. A field has no metadata of its own: the
- * record has one metadata block and names its conflicted fields. So this pane
- * makes no node request for the value: it shows the value that the record read
- * already returned, the field key from the schema, and the record's conflict
- * flag for this field. A file stat of the value is the one optional read.
+ * record has one metadata block. So this pane makes no node request for the
+ * value: it shows the value that the record read already returned and the
+ * field key from the schema. A file stat of the value is the one optional read.
  */
-export default function FieldPane({ schemaDetail, field, conflicted, value, present }) {
+export default function FieldPane({ schemaDetail, field, value, present }) {
   const fieldKeyId = schemaDetail?.field_key_ids?.[field] ?? null;
 
   // Schemas that track files tend to keep the path in an ordinary field.
@@ -135,12 +134,6 @@ export default function FieldPane({ schemaDetail, field, conflicted, value, pres
               <>
                 <dt>on disk</dt>
                 <dd>{formatBytes(file.data.size)}</dd>
-              </>
-            )}
-            {conflicted && (
-              <>
-                <dt>conflicts</dt>
-                <dd style={{ color: 'var(--warn)' }}>yes — the record keeps a losing value of this field</dd>
               </>
             )}
           </dl>

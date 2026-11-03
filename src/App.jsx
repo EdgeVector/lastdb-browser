@@ -101,7 +101,6 @@ export default function App() {
         <FieldPane
           schemaDetail={detail.data}
           field={field}
-          conflicted={recordMeta?.conflictedFields?.includes(field) ?? false}
           value={recordMeta?.fields?.[field]}
           present={recordMeta != null && field != null && field in recordMeta.fields}
         />

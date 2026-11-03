@@ -17,10 +17,7 @@ function renderValue(v) {
  * (HashKey / HashRangeKey), so the width is paid on exactly one row.
  *
  * The node stores one record per key, so the record read is the whole read.
- * The record carries one metadata block and its conflict flag:
- * `has_conflicts` (true, false, or "unknown") and, when true,
- * `conflicted_fields`. The values and the conflicted fields go to the field
- * pane.
+ * The record carries one metadata block. The values go to the field pane.
  */
 export default function RecordPane({
   schema,
@@ -51,10 +48,10 @@ export default function RecordPane({
   const data = result.data?.row ?? null;
   const readMode = result.data?.mode ?? null;
 
-  // Hand the values and the conflicted fields to the field pane. They arrive
-  // with the record read, so level 4 needs no node request.
+  // Hand the values to the field pane. They arrive with the record read, so
+  // level 4 needs no node request.
   useEffect(() => {
-    onMeta?.(data ? { fields: data.fields ?? {}, conflictedFields: data.conflicted_fields ?? [] } : null);
+    onMeta?.(data ? { fields: data.fields ?? {} } : null);
   }, [data, onMeta]);
 
   if (!schema) {
@@ -186,7 +183,6 @@ export default function RecordPane({
         {selectedKey &&
           data &&
           fields.map((f) => {
-            const conflicted = data.conflicted_fields?.includes(f) ?? false;
             const present = f in (data.fields || {});
             return (
               <div
@@ -198,7 +194,6 @@ export default function RecordPane({
                 <div className="field-head">
                   <span className="field-name">{f}</span>
                   <span className="field-type">{typeName(detail?.field_types?.[f])}</span>
-                  {conflicted && <span className="badge conflict">conflict</span>}
                 </div>
                 <div className="field-val">
                   {present ? renderValue(data.fields[f]) : <em style={{ opacity: 0.6 }}>no value</em>}
