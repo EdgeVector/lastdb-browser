@@ -171,8 +171,7 @@ export async function keyLookup(schemaName, keyFields, filter) {
  * Level 3 — one record, hydrated.
  *
  * Now, and only now, do we ask for every field. The response carries the
- * record metadata block and the record conflict flag (`has_conflicts` and
- * `conflicted_fields`), so level 4 needs no read of its own.
+ * record metadata block, so level 4 needs no read of its own.
  */
 export function keyFilter(key) {
   return key.range == null || key.range === ''
@@ -222,7 +221,7 @@ export async function recordByField(schemaName, fields, key, maxFields = 48) {
   }
 
   const items = batch?.results ?? [];
-  const row = { key, fields: {}, metadata: null, conflicted_fields: [] };
+  const row = { key, fields: {}, metadata: null };
   let any = false;
   for (let i = 0; i < chosen.length; i++) {
     const f = chosen[i];
@@ -236,9 +235,6 @@ export async function recordByField(schemaName, fields, key, maxFields = 48) {
     if (f in (res.fields || {})) row.fields[f] = res.fields[f];
     // The record has one metadata block; each per-field read returns it.
     if (res.metadata) row.metadata = res.metadata;
-    for (const name of res.conflicted_fields ?? []) {
-      if (!row.conflicted_fields.includes(name)) row.conflicted_fields.push(name);
-    }
   }
   return any ? row : null;
 }

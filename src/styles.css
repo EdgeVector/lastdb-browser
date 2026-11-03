@@ -230,7 +230,6 @@ code, .mono { font-family: var(--mono); }
   flex: 0 0 auto;
 }
 .badge.hr { border-color: var(--accent); color: var(--accent); }
-.badge.conflict { border-color: var(--warn); color: var(--warn); }
 
 /* ---------------------------------------------------------------- panels */
 

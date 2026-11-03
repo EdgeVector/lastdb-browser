@@ -41,11 +41,10 @@ route — or *keyed lookup*, a direct `HashKey` / `HashRangeKey` /
 total census; lookup remains the node's O(1) / O(log M) access pattern.
 
 **3 · Record.** One record, every field, with each field's value, type,
-description, field key, and conflict flag. The record carries one metadata block
-and `has_conflicts`; when it is true, `conflicted_fields` names the fields.
+description, and field key. The record carries one metadata block.
 
-**4 · Field.** The value of one field from the record read, its field key from
-the schema, and its conflict flag. The pane also shows files, as described below.
+**4 · Field.** The value of one field from the record read and its field key
+from the schema. The pane also shows files, as described below.
 The node stores one record per key, and a field has no metadata of its own.
 So this level reads nothing more from the node.
 
@@ -81,7 +80,7 @@ with no path to `/api/mutation`.
 | Keys — browse | `GET /api/list?schema=…&limit=…&cursor=…` | Keys only, cursor-paged, no bodies or scan header. |
 | Keys — lookup | `POST /api/query`, key-restricted | O(1) / O(log M). No scan header. |
 | Record | `POST /api/query`, keyed, all fields | The first read that asks for full width, on one row. |
-| Field | none | The value and the conflict flag come from the record read. |
+| Field | none | The value comes from the record read. |
 
 ## Browse pagination
 
