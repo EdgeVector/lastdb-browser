@@ -2,27 +2,6 @@ import React from 'react';
 import * as api from '../api.js';
 import { useAsync } from '../useAsync.js';
 
-/**
- * Pull a `$lastdb_file` descriptor out of a field value, if that is what it is.
- *
- * The value can arrive as a JSON string, so this parses before matching.
- */
-function lastdbFile(content) {
-  if (!content) return null;
-  let value = content;
-  if (typeof value === 'string') {
-    const t = value.trim();
-    if (!t.startsWith('{') || !t.includes('$lastdb_file')) return null;
-    try {
-      value = JSON.parse(t);
-    } catch {
-      return null;
-    }
-  }
-  const descriptor = value?.$lastdb_file;
-  return descriptor && typeof descriptor === 'object' ? descriptor : null;
-}
-
 function formatBytes(n) {
   if (typeof n !== 'number') return '';
   if (n < 1024) return `${n} B`;
@@ -63,12 +42,6 @@ export default function FieldPane({ schemaDetail, field, value, present }) {
     [fileCandidate],
   );
 
-  // A LastDB file is not a path. Most files here live IN the database as an
-  // encrypted blob described by a `$lastdb_file` envelope — name, media type,
-  // size, `blob_ref`, and the DEK. Raw, that JSON is unreadable; named, it is
-  // the most useful thing on the pane.
-  const blob = lastdbFile(value);
-
   if (!field) {
     return (
       <div className="col col-field">
@@ -98,30 +71,8 @@ export default function FieldPane({ schemaDetail, field, value, present }) {
       </div>
 
       <div className="col-body">
-        {blob && (
-          <div className="section" style={{ borderTop: 'none' }}>
-            <h3>File</h3>
-            <div className="field-name" style={{ fontSize: 12, wordBreak: 'break-word' }}>
-              {blob.name || '(unnamed)'}
-            </div>
-            <dl className="kv" style={{ marginTop: 6 }}>
-              <dt>type</dt>
-              <dd>{blob.media_type || 'unknown'}</dd>
-              <dt>size</dt>
-              <dd>{formatBytes(blob.encrypted_size_bytes)} encrypted</dd>
-              <dt>blob</dt>
-              <dd style={{ fontSize: 10.5 }}>{blob.blob_ref}</dd>
-            </dl>
-            <div className="note" style={{ marginTop: 7 }}>
-              Stored in the database as an encrypted blob, not on disk. The node
-              exposes no read route for decrypted bytes, so there is nothing to
-              open yet — the descriptor is shown instead of pretending otherwise.
-            </div>
-          </div>
-        )}
-
-        <div className="section" style={blob ? undefined : { borderTop: 'none' }}>
-          <h3>{blob ? 'Raw content' : 'Content'}</h3>
+        <div className="section" style={{ borderTop: 'none' }}>
+          <h3>Content</h3>
           <pre className="field-content">{present ? pretty(value) : '—'}</pre>
         </div>
 

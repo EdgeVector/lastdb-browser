@@ -8,9 +8,9 @@ import React, { useMemo, useState } from 'react';
  * the ~138 that are actually yours. The toggle keeps the empty ones reachable
  * without making them the default view.
  *
- * A format 7 node sends `record_count: null` and `has_data: null` for a schema
- * it did not count (an unfiltered count fails above 10,000 records). Unknown is
- * not empty, so such a schema stays in the default view and shows "?".
+ * A node can send `record_count: null` and `has_data: null` for a schema it
+ * did not count. Unknown is not empty, so such a schema stays in the default
+ * view and shows "?".
  *
  * Nothing below this level is touched here — no shape, no keys, no records.
  */

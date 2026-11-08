@@ -94,19 +94,6 @@ async function query(body, { label }) {
   return payload.data;
 }
 
-async function queryBatch(queries, { label }) {
-  const payload = await call(
-    '/db/queries/batch',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ queries }),
-    },
-    label,
-  );
-  return payload.data;
-}
-
 /**
  * Level 2b — a cursor page of live KEYS in a schema.
  *
@@ -126,52 +113,22 @@ export async function keyList(schemaName, { cursor = null, limit = 100 } = {}) {
 }
 
 /**
- * Candidate projection fields for keyed LOOKUP, best first.
+ * Level 2c — a keyed read: one partition (HashKey), one record
+ * (HashRangeKey), or a prefix under one hash (HashRangePrefix).
  *
- * The HASH KEY FIELD leads, and that is not a stylistic choice — the projection
- * decides whether the returned key is usable at all. For one page of rows, only
- * the hash component of the key changes with the projection:
- *
- *   projecting the hash field    -> key.hash is the plaintext value
- *   projecting any other field   -> key.hash is the ENCODED partition token
- *
- * The range component is the same either way. The token cannot be fed back to a
- * HashKey read, so a listing built on one looks perfectly normal and every
- * record opened from it resolves to nothing. The plaintext is recoverable only
- * from the hash field's own value, so no other field can stand in for it.
- *
- * Hence: hash field, then range field, then data fields as a last resort for
- * schemas whose key fields carry no values at all.
+ * The node returns the full record. This is the supported access pattern —
+ * O(1) / O(log M) — so it does not carry the scan header, and it stays fast
+ * on schemas where the paged browse is slow.
  */
-export function projectionCandidates(schema) {
-  const fields = schema?.fields ?? [];
-  const hashField = schema?.key?.hash_field;
-  const rangeField = schema?.key?.range_field;
-  const keyFields = [hashField, rangeField].filter((f) => f && fields.includes(f));
-  const nonKey = fields.filter((f) => !keyFields.includes(f));
-  return [...keyFields, ...nonKey];
-}
-
-/**
- * Level 2c — a keyed read: one partition (HashKey) or one record
- * (HashRangeKey), still projecting only the key fields.
- *
- * This is the node's supported access pattern — O(1) / O(log M) — so it does
- * NOT carry the scan header, and it stays fast on schemas where the paged
- * browse is slow.
- */
-export async function keyLookup(schemaName, keyFields, filter) {
+export async function keyLookup(schemaName, filter) {
   return query(
-    { schema_name: schemaName, fields: keyFields, filter },
+    { schema_name: schemaName, filter },
     { label: `lookup ${short(schemaName)}` },
   );
 }
 
 /**
- * Level 3 — one record, hydrated.
- *
- * Now, and only now, do we ask for every field. The response carries the
- * record metadata block, so level 4 needs no read of its own.
+ * The key filter for one selected identity.
  */
 export function keyFilter(key) {
   return key.range == null || key.range === ''
@@ -179,64 +136,18 @@ export function keyFilter(key) {
     : { HashRangeKey: { hash: key.hash, range: key.range } };
 }
 
-export async function record(schemaName, fields, key) {
+/**
+ * Level 3 — one record.
+ *
+ * A keyed query returns the full record, including its metadata block, so
+ * level 4 needs no read of its own.
+ */
+export async function record(schemaName, key) {
   const data = await query(
-    { schema_name: schemaName, fields, filter: keyFilter(key) },
+    { schema_name: schemaName, filter: keyFilter(key) },
     { label: `record ${short(key.hash)}` },
   );
   return data.results?.[0] ?? null;
-}
-
-/**
- * Rebuild a record one field at a time.
- *
- * The wide read above returns a row only if EVERY projected field resolves on
- * it, so a single missing field blanks the whole record — and on a schema that
- * has gained fields over time, that is the normal case for older rows rather
- * than an exotic one. Reading each field on its own removes the coupling: a
- * field that has no value drops itself instead of the record.
- *
- * This is the fallback, not the default: it is one batch of N keyed queries
- * (one field per item, same key) instead of one wide read. The node runs the
- * items independently, so a missing or failed field drops itself. The wide
- * read is still strictly better when it works. Cap stays at 48 so the node
- * 64-item batch limit is not hit.
- */
-export async function recordByField(schemaName, fields, key, maxFields = 48) {
-  const filter = keyFilter(key);
-  const chosen = fields.slice(0, maxFields);
-  if (chosen.length === 0) return null;
-
-  const queries = chosen.map((f) => ({
-    schema_name: schemaName,
-    fields: [f],
-    filter,
-  }));
-
-  let batch;
-  try {
-    batch = await queryBatch(queries, { label: `record-by-field ${short(key.hash)}` });
-  } catch {
-    return null;
-  }
-
-  const items = batch?.results ?? [];
-  const row = { key, fields: {}, metadata: null };
-  let any = false;
-  for (let i = 0; i < chosen.length; i++) {
-    const f = chosen[i];
-    const item = items[i];
-    // A thrown per-field query used to become [f, null]. A non-200 batch item
-    // is the same: drop the field, keep the rest of the record.
-    if (!item || item.status !== 200) continue;
-    const res = item.response?.results?.[0] ?? null;
-    if (!res) continue;
-    any = true;
-    if (f in (res.fields || {})) row.fields[f] = res.fields[f];
-    // The record has one metadata block; each per-field read returns it.
-    if (res.metadata) row.metadata = res.metadata;
-  }
-  return any ? row : null;
 }
 
 /**

@@ -10,14 +10,12 @@ function renderValue(v) {
 }
 
 /**
- * Level 3 — one record, fully hydrated.
+ * Level 3 — one record.
  *
- * This is the first read in the drill-down that asks for every field, and it
- * happens only after a specific key has been clicked. It is a keyed read
- * (HashKey / HashRangeKey), so the width is paid on exactly one row.
- *
- * The node stores one record per key, so the record read is the whole read.
- * The record carries one metadata block. The values go to the field pane.
+ * Every query returns the full record. This read happens only after a specific
+ * key has been clicked. The node stores one record per key, so the record read
+ * is the whole read. The record carries one metadata block. The values go to
+ * the field pane.
  */
 export default function RecordPane({
   schema,
@@ -33,20 +31,14 @@ export default function RecordPane({
     !schema || !selectedKey
       ? null
       : async () => {
-          // One wide keyed read is the cheap path and the common case.
-          const wide = await api.record(schema.name, fields, selectedKey);
-          if (wide) return { row: wide, mode: 'wide' };
-          // Blank means the projection coupled the fields together, not
-          // necessarily that the record is absent — rebuild it field by field.
-          const split = await api.recordByField(schema.name, fields, selectedKey);
-          return { row: split, mode: split ? 'per-field' : 'none' };
+          const row = await api.record(schema.name, selectedKey);
+          return { row };
         },
-    [schema?.name, selectedKey?.hash, selectedKey?.range, fields.join(',')],
+    [schema?.name, selectedKey?.hash, selectedKey?.range],
   );
 
   const { loading, error } = result;
   const data = result.data?.row ?? null;
-  const readMode = result.data?.mode ?? null;
 
   // Hand the values to the field pane. They arrive with the record read, so
   // level 4 needs no node request.
@@ -160,24 +152,7 @@ export default function RecordPane({
         )}
 
         {selectedKey && !loading && !error && !data && (
-          <div className="empty">
-            Nothing resolved at that key.
-            <br />
-            <br />
-            Neither a wide read nor a field-by-field read returned a value here.
-            The most common cause is that the key list was projected on a field
-            other than <code>{schema.key?.hash_field}</code>, in which case the
-            node reports the encoded partition token instead of the real hash —
-            and no keyed read can address that. Set <strong>list by</strong> to{' '}
-            <code>{schema.key?.hash_field}</code> and try again.
-          </div>
-        )}
-
-        {selectedKey && data && readMode === 'per-field' && (
-          <div className="note" style={{ padding: '7px 10px', borderBottom: '1px solid var(--border)' }}>
-            Rebuilt field by field — the combined read returned nothing, so at
-            least one field has no value at this key.
-          </div>
+          <div className="empty">Nothing resolved at that key.</div>
         )}
 
         {selectedKey &&
