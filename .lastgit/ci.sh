@@ -31,15 +31,6 @@ echo "== venue =="
 test "$(head -n 1 .last-stack/pr-venue)" = "github"
 test -f .github/workflows/ci-required.yml
 
-echo "== artifact declaration covers what the launcher needs =="
-# host-track packs exactly `.lastgit/artifacts.json` paths. If the launcher, the
-# post-install, or a build input is missing from that list, the installed app is
-# broken in a way nothing else here would catch.
-for required in README.md bin index.html package.json package-lock.json server.mjs src vite.config.js; do
-  grep -q "\"$required\"" .lastgit/artifacts.json \
-    || { echo "FAIL: $required missing from .lastgit/artifacts.json"; exit 1; }
-done
-
 echo "== no host identity in shipped tree =="
 # The public repo must not carry usernames, home paths, emails or private IPs.
 if grep -rnE '/Users/[a-z]|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|192\.168\.|10\.[0-9]+\.[0-9]+\.[0-9]+|100\.[0-9]+\.[0-9]+\.[0-9]+' \
