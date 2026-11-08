@@ -50,19 +50,13 @@ So this level reads nothing more from the node.
 
 ## Files
 
-A field value can point at a file two ways, and the pane handles both.
+A field value can name a filesystem path.
 
 A **filesystem path** gets *Open*, *Reveal in Finder*, and *Copy path*. The path
 is checked against disk first, and the buttons appear only if it resolves. Paths
 come out of the database, so they are treated as untrusted input: the bridge
 uses `execFile` with an argument array rather than a shell, and refuses to
 *open* anything the OS would execute — those are Reveal-only.
-
-A **LastDB file blob** — a `$lastdb_file` envelope — is rendered as a file card
-with its name, media type, and size. These live encrypted inside the database
-rather than on disk, and the node currently exposes no read route for decrypted
-bytes, so there is nothing to open yet; the descriptor is shown rather than a
-button that would not work.
 
 ## Why there is a bridge
 
@@ -78,8 +72,8 @@ with no path to `/api/mutation`.
 | Schemas | `GET /api/schemas?include_counts=true` | Slow (it counts every schema); cached to disk. The only cached read. |
 | Schema shape | `GET /api/schema/{name}` | Field types, descriptions, field key ids. |
 | Keys — browse | `GET /api/list?schema=…&limit=…&cursor=…` | Keys only, cursor-paged, no bodies or scan header. |
-| Keys — lookup | `POST /api/query`, key-restricted | O(1) / O(log M). No scan header. |
-| Record | `POST /api/query`, keyed, all fields | The first read that asks for full width, on one row. |
+| Keys — lookup | `POST /api/query`, key-restricted | O(1) / O(log M). Returns the full record. No scan header. |
+| Record | `POST /api/query`, keyed | Returns the full record for one key. |
 | Field | none | The value comes from the record read. |
 
 ## Browse pagination

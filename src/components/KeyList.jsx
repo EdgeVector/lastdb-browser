@@ -16,8 +16,8 @@ const PAGE_SIZES = [25, 50, 100, 250];
  *    HashRangeKey for a record, HashRangePrefix for a slice of one partition.
  *    O(1) / O(log M), no scan header, fast on schemas where browse is not.
  *
- * LOOKUP projects one field so the node can return a keyed row envelope. Browse
- * needs no field projection because `/api/list` returns identities directly.
+ * LOOKUP is a keyed query. The node returns the full record. Browse needs no
+ * field list because `/api/list` returns identities directly.
  */
 export default function KeyList({ schema, selectedKey, onSelect }) {
   const [limit, setLimit] = useState(50);
@@ -31,9 +31,8 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
   const hashField = schema?.key?.hash_field;
   const rangeField = schema?.key?.range_field;
   const isHashRange = Boolean(rangeField);
-  const candidates = api.projectionCandidates(schema);
 
-  // Reset paging, lookup, and the chosen projection when the schema changes.
+  // Reset paging and lookup when the schema changes.
   useEffect(() => {
     setBrowsePage({ cursor: null, start: 0 });
     setBrowseHistory([]);
@@ -47,11 +46,8 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
     !schema
       ? null
       : mode === 'lookup'
-        ? candidates.length === 0
-          ? null
-          : lookup
-          ? () =>
-              api.keyLookup(schema.name, [candidates[0]], lookup).then((data) => ({ data }))
+        ? lookup
+          ? () => api.keyLookup(schema.name, lookup).then((data) => ({ data }))
           : null
         : () => api.keyList(schema.name, { cursor: browsePage.cursor, limit }).then((data) => ({ data })),
     [schema?.name, mode, browsePage.cursor, limit, JSON.stringify(lookup)],
