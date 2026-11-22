@@ -134,10 +134,12 @@ code, .mono { font-family: var(--mono); }
   border-right: 1px solid var(--border);
   background: var(--bg);
 }
-.col-schemas { flex: 0 1 290px; min-width: 210px; }
-.col-keys { flex: 0 1 320px; min-width: 210px; }
-.col-record { flex: 1.1 1 360px; min-width: 260px; }
-.col-field { flex: 1 1 400px; min-width: 280px; border-right: none; }
+.col-databases { flex: 0 1 190px; min-width: 160px; }
+.col-schemas { flex: 0 1 260px; min-width: 195px; }
+.col-keys { flex: 0 1 290px; min-width: 200px; }
+.col-record { flex: 1.2 1 350px; min-width: 250px; }
+.col-record:last-child { border-right: none; }
+.col-field { flex: 1 1 340px; min-width: 250px; border-right: none; }
 
 .col-head {
   flex: 0 0 auto;

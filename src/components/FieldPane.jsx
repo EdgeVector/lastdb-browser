@@ -23,51 +23,49 @@ function pretty(content) {
   return content;
 }
 
-/**
- * Level 4 — one field of the open record.
- *
- * The node stores one record per key. A field has no metadata of its own: the
- * record has one metadata block. So this pane makes no node request for the
- * value: it shows the value that the record read already returned and the
- * field key from the schema. A file stat of the value is the one optional read.
- */
-export default function FieldPane({ schemaDetail, field, value, present }) {
-  const fieldKeyId = schemaDetail?.field_key_ids?.[field] ?? null;
+function pathCandidate(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 4096 || /[\n\r\0]/.test(trimmed)) return null;
+  if (!trimmed.startsWith('/') && !trimmed.startsWith('~/') && !trimmed.startsWith('file://')) {
+    return null;
+  }
+  return trimmed;
+}
 
-  // Schemas that track files tend to keep the path in an ordinary field.
-  const fileCandidate = typeof value === 'string' ? value : null;
+/**
+ * Level 5 — one field of the open record.
+ *
+ * Uses the field value and schema metadata already loaded in earlier columns,
+ * making zero node requests. Only checks disk when the string looks like an
+ * actual local file path (`/…`, `~/…`, or `file://…`).
+ */
+export default function FieldPane({ schema, field, value, present, onClose }) {
+  const fieldHash = schema?.field_hashes?.[field] ?? null;
+  const fieldDesc = schema?.field_descriptions?.[field] ?? null;
+  const fileCandidate = pathCandidate(value);
 
   const file = useAsync(
     fileCandidate ? () => api.statFile(fileCandidate) : null,
     [fileCandidate],
   );
 
-  if (!field) {
-    return (
-      <div className="col col-field">
-        <div className="col-head">
-          <div className="col-title">4 · Field</div>
-        </div>
-        <div className="empty">
-          Click a field to show its value.
-          <br />
-          <br />
-          The record read already carries every field value and the record
-          metadata, so this pane makes no node request.
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="col col-field">
       <div className="col-head">
         <div className="col-title">
-          <span>4 · Field</span>
+          <span>5 · Field</span>
+          <span className="spacer" style={{ flex: 1 }} />
+          {onClose && (
+            <button onClick={onClose} title="Close field inspector">
+              ×
+            </button>
+          )}
         </div>
         <div className="row-name" style={{ marginTop: 5, fontWeight: 600 }}>
           {field}
         </div>
+        {fieldDesc && <div className="field-desc">{fieldDesc}</div>}
       </div>
 
       <div className="col-body">
@@ -76,19 +74,25 @@ export default function FieldPane({ schemaDetail, field, value, present }) {
           <pre className="field-content">{present ? pretty(value) : '—'}</pre>
         </div>
 
-        <div className="section">
-          <h3>Addresses</h3>
-          <dl className="kv">
-            <dt>field key</dt>
-            <dd style={{ fontSize: 10.5 }}>{fieldKeyId}</dd>
-            {file.data?.exists && (
-              <>
-                <dt>on disk</dt>
-                <dd>{formatBytes(file.data.size)}</dd>
-              </>
-            )}
-          </dl>
-        </div>
+        {(fieldHash || file.data?.exists) && (
+          <div className="section">
+            <h3>Details</h3>
+            <dl className="kv">
+              {fieldHash && (
+                <>
+                  <dt>field hash</dt>
+                  <dd style={{ fontSize: 10.5 }}>{fieldHash}</dd>
+                </>
+              )}
+              {file.data?.exists && (
+                <>
+                  <dt>on disk</dt>
+                  <dd>{formatBytes(file.data.size)}</dd>
+                </>
+              )}
+            </dl>
+          </div>
+        )}
 
         {file.data?.exists && (
           <div className="section">
@@ -122,7 +126,6 @@ export default function FieldPane({ schemaDetail, field, value, present }) {
             )}
           </div>
         )}
-
       </div>
     </div>
   );

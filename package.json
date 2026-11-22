@@ -1,9 +1,9 @@
 {
   "name": "lastdb-browser",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Interactive data browser for a local LastDB node: schemas -> keys -> records -> fields.",
+  "description": "Interactive data browser for a local LastDB node: databases -> schemas -> keys -> records -> fields.",
   "scripts": {
     "dev": "concurrently -n bridge,vite -c cyan,magenta \"node server.mjs\" \"vite\"",
     "bridge": "node server.mjs",

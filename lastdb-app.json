@@ -1,10 +1,10 @@
 {
   "app_id": "lastdb-browser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "source": "https://github.com/EdgeVector/lastdb-browser.git",
   "metadata": {
     "display_name": "lastdb-browser",
-    "description": "Interactive data browser for a local LastDB node: schemas -> keys -> records -> fields.",
+    "description": "Interactive data browser for a local LastDB node: databases -> schemas -> keys -> records -> fields.",
     "homepage_url": "https://github.com/EdgeVector/lastdb-browser"
   },
   "run": {
@@ -12,6 +12,13 @@
     "entrypoint": "bin/lastdb-browser"
   },
   "schemas": [],
+  "access": {
+    "read": "*",
+    "write": [],
+    "extensions": [
+      "databases"
+    ]
+  },
   "install": {
     "prepare": [
       {

@@ -1,80 +1,77 @@
-import React, { useEffect } from 'react';
-import * as api from '../api.js';
-import { useAsync } from '../useAsync.js';
+import React, { useMemo } from 'react';
 import { short } from '../api.js';
 
 function renderValue(v) {
   if (v === null || v === undefined) return '—';
-  if (typeof v === 'string') return v;
+  if (typeof v === 'string') return v === '' ? '(empty string)' : v;
   return JSON.stringify(v, null, 2);
 }
 
+function formatBytes(n) {
+  if (typeof n !== 'number') return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
 /**
- * Level 3 — one record.
+ * Level 4 — one record in the selected schema on the selected database.
  *
- * Every query returns the full record. This read happens only after a specific
- * key has been clicked. The node stores one record per key, so the record read
- * is the whole read. The record carries one metadata block. The values go to
- * the field pane.
+ * Hydrated via `POST /v1/read` (`ReadByKey`) only after a key is clicked.
  */
 export default function RecordPane({
+  database,
   schema,
-  detail,
   selectedKey,
+  recordData,
+  loading,
+  error,
   selectedField,
   onSelectField,
-  onMeta,
 }) {
-  const fields = schema?.fields ?? [];
+  const data = recordData;
+  const fieldValues = data?.record ?? {};
 
-  const result = useAsync(
-    !schema || !selectedKey
-      ? null
-      : async () => {
-          const row = await api.record(schema.name, selectedKey);
-          return { row };
-        },
-    [schema?.name, selectedKey?.hash, selectedKey?.range],
-  );
+  const orderedFields = useMemo(() => {
+    const declared = schema?.fields ?? [];
+    const seen = new Set(declared);
+    const extra = Object.keys(fieldValues).filter((k) => !seen.has(k));
+    return [...declared, ...extra];
+  }, [schema?.fields, fieldValues]);
 
-  const { loading, error } = result;
-  const data = result.data?.row ?? null;
-
-  // Hand the values to the field pane. They arrive with the record read, so
-  // level 4 needs no node request.
-  useEffect(() => {
-    onMeta?.(data ? { fields: data.fields ?? {} } : null);
-  }, [data, onMeta]);
-
-  if (!schema) {
+  if (!database || !schema) {
     return (
       <div className="col col-record">
         <div className="col-head">
-          <div className="col-title">3 · Record</div>
+          <div className="col-title">4 · Record</div>
         </div>
         <div className="empty">
           <strong>LastDB Browser</strong>
           <br />
-          Schemas → keys → record → field. Each level is fetched only when you open it.
+          Databases → schemas → keys → record. Each level is fetched only when opened.
         </div>
       </div>
     );
   }
 
+  const primary = schema.record_keys?.primary;
+  const alternates = schema.record_keys?.alternates ?? {};
+  const altEntries = Object.entries(alternates);
+
   return (
     <div className="col col-record">
       <div className="col-head">
         <div className="col-title">
-          <span>3 · Record</span>
+          <span>4 · Record</span>
           {loading && <span className="spin" />}
         </div>
         <div style={{ marginTop: 5 }}>
           <div className="row-name" style={{ fontSize: 12, fontWeight: 600 }}>
-            {schema.descriptive_name || short(schema.name, 14)}
+            {schema.descriptive_name || schema.name}
           </div>
           {selectedKey ? (
             <div className="row-sub" style={{ whiteSpace: 'normal' }}>
-              <code>{selectedKey.hash}</code>
+              <code>{selectedKey.hash || '(empty)'}</code>
               {selectedKey.range != null && (
                 <>
                   {' '}
@@ -83,7 +80,7 @@ export default function RecordPane({
               )}
             </div>
           ) : (
-            <div className="row-sub">{schema.record_count ?? '—'} records</div>
+            <div className="row-sub">{schema.name}</div>
           )}
         </div>
       </div>
@@ -98,23 +95,42 @@ export default function RecordPane({
               <dl className="kv">
                 <dt>identity</dt>
                 <dd>{schema.name}</dd>
+                <dt>database</dt>
+                <dd>{database.name || database.id}</dd>
                 <dt>type</dt>
                 <dd>{schema.schema_type}</dd>
-                <dt>key</dt>
+                <dt>primary key</dt>
                 <dd>
-                  {schema.key?.hash_field}
-                  {schema.key?.range_field ? ` / ${schema.key.range_field}` : ''}
+                  {primary?.kind === 'hash_range'
+                    ? `hash + range (${primary.range_type || 'String'})`
+                    : 'hash'}
                 </dd>
+                {altEntries.length > 0 && (
+                  <>
+                    <dt>alternates</dt>
+                    <dd>
+                      {altEntries
+                        .map(([name, def]) =>
+                          def.kind === 'hash_range'
+                            ? `${name} (hash + ${def.range_type || 'String'})`
+                            : `${name} (hash)`,
+                        )
+                        .join(', ')}
+                    </dd>
+                  </>
+                )}
                 {schema.owner_app_id && (
                   <>
                     <dt>owner app</dt>
                     <dd>{schema.owner_app_id}</dd>
                   </>
                 )}
-                <dt>records</dt>
-                <dd>{schema.record_count ?? '—'}</dd>
-                <dt>source</dt>
-                <dd>{schema.source}</dd>
+                {schema.identity_hash && (
+                  <>
+                    <dt>definition</dt>
+                    <dd>{short(schema.identity_hash, 12)}</dd>
+                  </>
+                )}
               </dl>
               {schema.purpose_statement && (
                 <p className="note" style={{ marginTop: 8 }}>
@@ -124,30 +140,26 @@ export default function RecordPane({
             </div>
 
             <div className="section">
-              <h3>Fields ({fields.length})</h3>
-              {fields.map((f) => (
+              <h3>Fields ({(schema.fields || []).length})</h3>
+              {(schema.fields || []).map((f) => (
                 <div key={f} style={{ padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
                   <div className="field-head">
                     <span className="field-name">{f}</span>
-                    <span className="field-type">
-                      {typeName(detail?.field_types?.[f])}
-                    </span>
-                    {f === schema.key?.hash_field && <span className="badge hr">hash</span>}
-                    {f === schema.key?.range_field && <span className="badge hr">range</span>}
+                    <span className="field-type">{typeName(schema.field_types?.[f])}</span>
                   </div>
-                  {detail?.field_descriptions?.[f] && (
-                    <div className="field-desc">{detail.field_descriptions[f]}</div>
+                  {schema.field_descriptions?.[f] && (
+                    <div className="field-desc">{schema.field_descriptions[f]}</div>
                   )}
-                  {detail?.field_key_ids?.[f] && (
+                  {schema.field_hashes?.[f] && (
                     <div className="field-desc mono">
-                      field key {short(detail.field_key_ids[f], 12)}
+                      field hash {short(schema.field_hashes[f], 12)}
                     </div>
                   )}
                 </div>
               ))}
             </div>
 
-            <div className="empty">Pick a key to hydrate a record.</div>
+            <div className="empty">Pick a key to view its record.</div>
           </>
         )}
 
@@ -155,28 +167,64 @@ export default function RecordPane({
           <div className="empty">Nothing resolved at that key.</div>
         )}
 
-        {selectedKey &&
-          data &&
-          fields.map((f) => {
-            const present = f in (data.fields || {});
-            return (
-              <div
-                key={f}
-                className={`field${selectedField === f ? ' sel' : ''}`}
-                onClick={() => present && onSelectField(f)}
-                style={present ? undefined : { cursor: 'default', opacity: 0.55 }}
-              >
-                <div className="field-head">
-                  <span className="field-name">{f}</span>
-                  <span className="field-type">{typeName(detail?.field_types?.[f])}</span>
+        {selectedKey && data && (
+          <>
+            <div className="section" style={{ borderTop: 'none' }}>
+              <h3>Metadata</h3>
+              <dl className="kv">
+                <dt>revision</dt>
+                <dd>{short(data.revision, 12)}</dd>
+                {data.created_by && (
+                  <>
+                    <dt>created by</dt>
+                    <dd>{short(data.created_by, 12)}</dd>
+                  </>
+                )}
+                {data.updated_by && (
+                  <>
+                    <dt>updated by</dt>
+                    <dd>{short(data.updated_by, 12)}</dd>
+                  </>
+                )}
+                {data.file && (
+                  <>
+                    <dt>file</dt>
+                    <dd>
+                      {formatBytes(data.file.size)}
+                      {data.file.media_type ? ` · ${data.file.media_type}` : ''}
+                      {data.file.name ? ` · ${data.file.name}` : ''}
+                    </dd>
+                  </>
+                )}
+              </dl>
+            </div>
+
+            {orderedFields.map((f) => {
+              const present = f in fieldValues;
+              return (
+                <div
+                  key={f}
+                  className={`field${selectedField === f ? ' sel' : ''}`}
+                  onClick={() => present && onSelectField(f)}
+                  style={present ? undefined : { cursor: 'default', opacity: 0.55 }}
+                >
+                  <div className="field-head">
+                    <span className="field-name">{f}</span>
+                    <span className="field-type">{typeName(schema.field_types?.[f])}</span>
+                  </div>
+                  <div className="field-val">
+                    {present ? (
+                      renderValue(fieldValues[f])
+                    ) : (
+                      <em style={{ opacity: 0.6 }}>no value</em>
+                    )}
+                  </div>
+                  {present && <div className="field-desc mono">inspect field →</div>}
                 </div>
-                <div className="field-val">
-                  {present ? renderValue(data.fields[f]) : <em style={{ opacity: 0.6 }}>no value</em>}
-                </div>
-                {present && <div className="field-desc mono">field →</div>}
-              </div>
-            );
-          })}
+              );
+            })}
+          </>
+        )}
       </div>
     </div>
   );
@@ -185,6 +233,6 @@ export default function RecordPane({
 function typeName(t) {
   if (!t) return '';
   if (typeof t === 'string') return t;
-  if (t.Array) return `Array<${t.Array}>`;
+  if (t.Array) return `Array<${typeName(t.Array)}>`;
   return JSON.stringify(t);
 }

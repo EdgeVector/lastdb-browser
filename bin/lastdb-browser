@@ -19,7 +19,7 @@ APP_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 
 PORT="${LASTDB_BROWSER_PORT:-${PORT:-7666}}"
 export PORT
-export LASTDB_SOCKET="${LASTDB_SOCKET:-$HOME/.lastdb/data/folddb.sock}"
+export LASTDB_SOCKET="${LASTDB_SOCKET:-${LASTDB_SOCKET_PATH:-$HOME/.lastdb/data/folddb.sock}}"
 
 if [ ! -S "$LASTDB_SOCKET" ]; then
   echo "lastdb-browser: no LastDB socket at $LASTDB_SOCKET" >&2

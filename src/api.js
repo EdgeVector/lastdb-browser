@@ -1,9 +1,10 @@
 // Data-plane client.
 //
 // Every function here is one node round-trip, named for the drill-down step it
-// serves. Nothing fans out, nothing prefetches the next level: the panes call
-// these only when a pane is actually opened. That is the whole hydration policy
-// and it is enforced here rather than by discipline in the components.
+// serves:
+//   databases -> schemas -> keys -> record
+// Nothing fans out and nothing prefetches the next level: the panes call these
+// only when a pane is opened.
 
 const listeners = new Set();
 
@@ -43,7 +44,6 @@ async function call(url, init, label) {
     nodeMs: payload.ms ?? null,
     clientMs: Math.round(performance.now() - started),
     bytes: payload.bytes ?? null,
-    fullScan: payload.full_scan === true,
     error: payload.ok === false ? payload.error : null,
   };
   listeners.forEach((fn) => fn(entry));
@@ -57,37 +57,39 @@ export async function health() {
 }
 
 /**
- * Level 1 — the schema catalog.
- *
- * This is the only cached read. `include_counts=true` is what tells us which
- * schemas actually hold data, and it costs a full key-count pass on the node
- * (~30s here), so the bridge caches it and this is the only place that can ask
- * for a refresh.
+ * Level 1 — databases registered on the node (`POST /v1/x/databases` `list`).
  */
-export async function schemas({ refresh = false } = {}) {
-  return call(`/db/schemas${refresh ? '?refresh=1' : ''}`, undefined, 'schemas');
+export async function databases() {
+  const payload = await call('/db/databases', undefined, 'databases');
+  return payload.data?.databases ?? [];
 }
 
 /**
- * Level 2a — one schema's shape: field types, descriptions, key layout, and the
- * field key ids. Fetched only when a schema is opened.
+ * Level 2 — schemas on one selected database (`POST /v1/x/databases` `schemas`
+ * with `include_full: true`, so field types, descriptions, field hashes, and
+ * `record_keys` arrive in the same single round-trip).
  */
-export async function schemaDetail(name) {
+export async function schemas(databaseId) {
+  const qs = databaseId ? `?database=${encodeURIComponent(databaseId)}` : '';
   const payload = await call(
-    `/db/schema/${encodeURIComponent(name)}`,
+    `/db/schemas${qs}`,
     undefined,
-    `schema ${short(name)}`,
+    `schemas ${short(databaseId || 'personal', 10)}`,
   );
-  return payload.data.schema;
+  return {
+    fetched_at: new Date().toISOString(),
+    count: payload.data?.count ?? (payload.data?.schemas?.length ?? 0),
+    schemas: payload.data?.schemas ?? [],
+  };
 }
 
-async function query(body, { label }) {
+async function read(item, label) {
   const payload = await call(
-    '/db/query',
+    '/db/read',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(item),
     },
     label,
   );
@@ -95,75 +97,72 @@ async function query(body, { label }) {
 }
 
 /**
- * Level 2b — a cursor page of live KEYS in a schema.
- *
- * `/api/list` is the node's keys-only admin enumeration route. It returns
- * record identities without reading field values, so browse no longer needs
- * a projection, a full-scan capability header, or a misleading total count.
+ * Level 3a — a cursor page of primary keys in a schema (`POST /v1/read` with
+ * `keys_only: true`).
  */
-export async function keyList(schemaName, { cursor = null, limit = 100 } = {}) {
-  const qs = new URLSearchParams({ schema: schemaName, limit: String(limit) });
-  if (cursor) qs.set('cursor', cursor);
-  const payload = await call(
-    `/db/list?${qs}`,
-    undefined,
-    `keys ${short(schemaName)}`,
+export async function keyList(databaseId, schemaName, { cursor = null, limit = 100 } = {}) {
+  const item = {
+    database: databaseId,
+    schema: schemaName,
+    keys_only: true,
+    limit,
+  };
+  if (cursor != null && cursor !== '') item.cursor = cursor;
+  const page = await read(item, `keys ${short(schemaName)}`);
+  const next = page.next_cursor ?? null;
+  return {
+    keys: page.keys ?? [],
+    next_cursor: next,
+    has_more: next != null && next !== '',
+  };
+}
+
+/**
+ * Level 3b — a keyed or range lookup (`ReadByKey` or `ReadByRange` on
+ * `POST /v1/read`, optionally through a named alternate key `via`).
+ */
+export async function keyLookup(databaseId, schemaName, spec, { limit = 100, cursor = null } = {}) {
+  const item = {
+    database: databaseId,
+    schema: schemaName,
+    limit,
+    ...spec,
+  };
+  if (cursor != null && cursor !== '') item.cursor = cursor;
+  const page = await read(item, `lookup ${short(schemaName)}`);
+  const next = page.next_cursor ?? null;
+  return {
+    records: page.records ?? [],
+    next_cursor: next,
+    has_more: next != null && next !== '',
+  };
+}
+
+/**
+ * Level 4 — one record by primary key (`POST /v1/read` `ReadByKey`).
+ */
+export async function record(databaseId, schemaName, key) {
+  const keyInput = { hash: key.hash };
+  if (key.range != null) keyInput.range = key.range;
+  const page = await read(
+    {
+      database: databaseId,
+      schema: schemaName,
+      key: keyInput,
+    },
+    `record ${short(key.hash)}`,
   );
-  return payload.data.list;
+  return page.records?.[0] ?? null;
 }
 
-/**
- * Level 2c — a keyed read: one partition (HashKey), one record
- * (HashRangeKey), or a prefix under one hash (HashRangePrefix).
- *
- * The node returns the full record. This is the supported access pattern —
- * O(1) / O(log M) — so it does not carry the scan header, and it stays fast
- * on schemas where the paged browse is slow.
- */
-export async function keyLookup(schemaName, filter) {
-  return query(
-    { schema_name: schemaName, filter },
-    { label: `lookup ${short(schemaName)}` },
-  );
-}
-
-/**
- * The key filter for one selected identity.
- */
-export function keyFilter(key) {
-  return key.range == null || key.range === ''
-    ? { HashKey: key.hash }
-    : { HashRangeKey: { hash: key.hash, range: key.range } };
-}
-
-/**
- * Level 3 — one record.
- *
- * A keyed query returns the full record, including its metadata block, so
- * level 4 needs no read of its own.
- */
-export async function record(schemaName, key) {
-  const data = await query(
-    { schema_name: schemaName, filter: keyFilter(key) },
-    { label: `record ${short(key.hash)}` },
-  );
-  return data.results?.[0] ?? null;
-}
-
-/**
- * Does this value name a file that exists on disk?
- *
- * Called for a field value — plenty of schemas keep a path in an ordinary
- * field.
- */
+/** Does this value name a file that exists on disk? */
 export async function statFile(candidate) {
   if (!candidate) return { exists: false };
-  const payload = await call(
+  return call(
     `/db/file?path=${encodeURIComponent(candidate)}`,
     undefined,
     `stat ${short(candidate, 14)}`,
   );
-  return payload;
 }
 
 /** Hand the file to the OS: reveal in Finder, or open in the default app. */
