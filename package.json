@@ -1,7 +1,7 @@
 {
   "name": "lastdb-browser",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Interactive data browser for a local LastDB node: databases -> schemas -> keys -> records -> fields.",
   "scripts": {

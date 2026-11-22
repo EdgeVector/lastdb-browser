@@ -1,6 +1,6 @@
 {
   "app_id": "lastdb-browser",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "source": "https://github.com/EdgeVector/lastdb-browser.git",
   "metadata": {
     "display_name": "lastdb-browser",
