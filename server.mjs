@@ -313,14 +313,80 @@ const server = http.createServer(async (req, res) => {
     // --- Level 2: schemas on one database ----------------------------------
     if (p === '/db/schemas' && req.method === 'GET') {
       const database = url.searchParams.get('database');
+      const db = database && database.trim() ? database.trim() : null;
       const body = { action: 'schemas', include_full: true };
-      if (database && database.trim()) body.database = database.trim();
+      if (db) body.database = db;
       const nodeRes = await callNode({
         method: 'POST',
         target: '/v1/x/databases',
         body,
       });
-      relay(res, nodeRes, { database: body.database ?? null });
+      if (nodeRes.status < 200 || nodeRes.status >= 300) {
+        relay(res, nodeRes, { database: db });
+        return;
+      }
+      let parsed = null;
+      try {
+        parsed = JSON.parse(nodeRes.raw.toString('utf8'));
+      } catch {
+        relay(res, nodeRes, { database: db });
+        return;
+      }
+      if (!parsed || parsed.ok === false || parsed.error || !Array.isArray(parsed.schemas)) {
+        relay(res, nodeRes, { database: db });
+        return;
+      }
+
+      // Probe 1 key per schema in batches of 64 (`reads_per_request` cap) so the
+      // UI can hide registered schemas that currently hold zero keys in O(1) per
+      // schema (~10-15ms total) without counting records.
+      const BATCH_SIZE = 64;
+      const schemas = parsed.schemas.map((s) => ({ ...s }));
+      let totalMs = nodeRes.ms;
+      let totalBytes = nodeRes.raw.length;
+      for (let i = 0; i < schemas.length; i += BATCH_SIZE) {
+        const slice = schemas.slice(i, i + BATCH_SIZE);
+        const probeRes = await callNode({
+          method: 'POST',
+          target: '/v1/read',
+          body: {
+            reads: slice.map((s) => ({
+              ...(db ? { database: db } : {}),
+              schema: s.name,
+              keys_only: true,
+              limit: 1,
+            })),
+          },
+        });
+        totalMs += probeRes.ms;
+        totalBytes += probeRes.raw.length;
+        if (probeRes.status >= 200 && probeRes.status < 300) {
+          try {
+            const probeJson = JSON.parse(probeRes.raw.toString('utf8'));
+            const results = probeJson?.results ?? [];
+            slice.forEach((s, idx) => {
+              const item = results[idx];
+              if (item && Array.isArray(item.keys)) {
+                s.has_data = item.keys.length > 0;
+              }
+            });
+          } catch {
+            /* keep has_data as null if probe JSON cannot be parsed */
+          }
+        }
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        status: nodeRes.status,
+        ms: totalMs,
+        bytes: totalBytes,
+        database: db,
+        data: {
+          ...parsed,
+          schemas,
+        },
+      });
       return;
     }
 

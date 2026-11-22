@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
 
 /**
- * Level 2 — schemas on the selected database.
+ * Level 2 — non-empty schemas on the selected database.
  *
- * Loaded via `POST /v1/x/databases` (`schemas`, `include_full: true`) only
- * after a database has been selected.
+ * Loaded via `POST /v1/x/databases` (`schemas`, `include_full: true`) plus a
+ * batched `limit: 1` key probe on `POST /v1/read` so registered schemas with
+ * zero keys are hidden automatically.
  */
 export default function SchemaList({
   database,
@@ -18,10 +19,12 @@ export default function SchemaList({
   const [filter, setFilter] = useState('');
 
   const all = catalog?.schemas ?? [];
+  const nonEmpty = useMemo(() => all.filter((s) => s.has_data !== false), [all]);
+  const hiddenEmpty = all.length - nonEmpty.length;
 
   const rows = useMemo(() => {
     const needle = filter.trim().toLowerCase();
-    return all
+    return nonEmpty
       .filter((s) => {
         if (!needle) return true;
         return (
@@ -36,7 +39,7 @@ export default function SchemaList({
         if (appCmp !== 0) return appCmp;
         return (a.descriptive_name || a.name).localeCompare(b.descriptive_name || b.name);
       });
-  }, [all, filter]);
+  }, [nonEmpty, filter]);
 
   if (!database) {
     return (
@@ -74,7 +77,9 @@ export default function SchemaList({
       <div className="col-body">
         {loading && all.length === 0 && <div className="empty">Loading schemas…</div>}
         {!loading && !error && rows.length === 0 && (
-          <div className="empty">No schemas match.</div>
+          <div className="empty">
+            {nonEmpty.length === 0 ? 'No schemas with keys in this database.' : 'No schemas match.'}
+          </div>
         )}
         {rows.map((s) => {
           const primary = s.record_keys?.primary;
@@ -106,7 +111,10 @@ export default function SchemaList({
 
       <div className="pager">
         <span>
-          {rows.length} of {all.length} {all.length === 1 ? 'schema' : 'schemas'}
+          {filter.trim()
+            ? `${rows.length} of ${nonEmpty.length} ${nonEmpty.length === 1 ? 'schema' : 'schemas'}`
+            : `${nonEmpty.length} ${nonEmpty.length === 1 ? 'schema' : 'schemas'}`}
+          {hiddenEmpty > 0 ? ` (${hiddenEmpty} empty hidden)` : ''}
         </span>
       </div>
     </div>
