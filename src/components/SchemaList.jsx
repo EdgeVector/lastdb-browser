@@ -1,55 +1,62 @@
 import React, { useMemo, useState } from 'react';
 
 /**
- * Level 1 — the schema catalog.
+ * Level 2 — schemas on the selected database.
  *
- * Defaults to schemas that hold data. A fresh node ships ~1000 starter-seed
- * schema definitions with nothing behind them; listing those first would bury
- * the ~138 that are actually yours. The toggle keeps the empty ones reachable
- * without making them the default view.
- *
- * A node can send `record_count: null` and `has_data: null` for a schema it
- * did not count. Unknown is not empty, so such a schema stays in the default
- * view and shows "?".
- *
- * Nothing below this level is touched here — no shape, no keys, no records.
+ * Loaded via `POST /v1/x/databases` (`schemas`, `include_full: true`) only
+ * after a database has been selected.
  */
-export default function SchemaList({ catalog, loading, error, selected, onSelect, onRefresh }) {
+export default function SchemaList({
+  database,
+  catalog,
+  loading,
+  error,
+  selected,
+  onSelect,
+  onRefresh,
+}) {
   const [filter, setFilter] = useState('');
-  const [showEmpty, setShowEmpty] = useState(false);
 
   const all = catalog?.schemas ?? [];
 
   const rows = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     return all
-      .filter((s) => (showEmpty ? true : s.has_data !== false))
       .filter((s) => {
         if (!needle) return true;
         return (
           (s.descriptive_name || '').toLowerCase().includes(needle) ||
           (s.name || '').toLowerCase().includes(needle) ||
-          (s.owner_app_id || '').toLowerCase().includes(needle)
+          (s.owner_app_id || '').toLowerCase().includes(needle) ||
+          (s.purpose_statement || '').toLowerCase().includes(needle)
         );
       })
       .sort((a, b) => {
-        const ca = a.record_count ?? -1;
-        const cb = b.record_count ?? -1;
-        if (cb !== ca) return cb - ca;
+        const appCmp = (a.owner_app_id || '').localeCompare(b.owner_app_id || '');
+        if (appCmp !== 0) return appCmp;
         return (a.descriptive_name || a.name).localeCompare(b.descriptive_name || b.name);
       });
-  }, [all, filter, showEmpty]);
+  }, [all, filter]);
 
-  const withData = all.filter((s) => s.has_data !== false).length;
+  if (!database) {
+    return (
+      <div className="col col-schemas">
+        <div className="col-head">
+          <div className="col-title">2 · Schemas</div>
+        </div>
+        <div className="empty">Pick a database to list its schemas.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="col col-schemas">
       <div className="col-head">
         <div className="col-title">
-          <span>1 · Schemas</span>
+          <span>2 · Schemas</span>
           {loading && <span className="spin" />}
           <span className="spacer" style={{ flex: 1 }} />
-          <button onClick={onRefresh} disabled={loading} title="Re-count every schema on the node (~30s)">
+          <button onClick={onRefresh} disabled={loading} title="Reload schemas for this database">
             ↻
           </button>
         </div>
@@ -60,70 +67,48 @@ export default function SchemaList({ catalog, loading, error, selected, onSelect
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
-        <label className="note" style={{ display: 'flex', gap: 6, marginTop: 6, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            style={{ width: 'auto' }}
-            checked={showEmpty}
-            onChange={(e) => setShowEmpty(e.target.checked)}
-          />
-          <span>
-            include empty ({all.length - withData} of {all.length})
-          </span>
-        </label>
       </div>
 
       {error && <div className="err">{error}</div>}
 
       <div className="col-body">
-        {loading && all.length === 0 && (
-          <div className="empty">
-            Counting keys on every schema…
-            <br />
-            <br />
-            This is the one expensive read: it is what distinguishes a schema
-            holding data from one of the ~1000 seeded definitions that hold
-            none. It takes about a minute on a full node, then it is cached —
-            reopen is instant, and ↻ recounts.
-          </div>
-        )}
+        {loading && all.length === 0 && <div className="empty">Loading schemas…</div>}
         {!loading && !error && rows.length === 0 && (
           <div className="empty">No schemas match.</div>
         )}
-        {rows.map((s) => (
-          <button
-            key={s.name}
-            className={`row${selected?.name === s.name ? ' sel' : ''}`}
-            onClick={() => onSelect(s)}
-          >
-            <div className="row-main">
-              <span className="row-name">{s.descriptive_name || s.name}</span>
-              <span className="count">{countText(s)}</span>
-            </div>
-            <div className="row-sub">
-              <span className={`badge${s.schema_type === 'HashRange' ? ' hr' : ''}`}>
-                {s.schema_type}
-              </span>{' '}
-              {s.key?.hash_field}
-              {s.key?.range_field ? ` / ${s.key.range_field}` : ''}
-              {s.owner_app_id ? ` · ${s.owner_app_id}` : ''}
-            </div>
-          </button>
-        ))}
+        {rows.map((s) => {
+          const primary = s.record_keys?.primary;
+          const altCount = Object.keys(s.record_keys?.alternates || {}).length;
+          const isHR = primary?.kind === 'hash_range' || s.schema_type === 'HashRange';
+          return (
+            <button
+              key={s.name}
+              className={`row${selected?.name === s.name ? ' sel' : ''}`}
+              onClick={() => onSelect(s)}
+            >
+              <div className="row-main">
+                <span className="row-name">{s.descriptive_name || s.name}</span>
+                <span className="count">{(s.fields || []).length}f</span>
+              </div>
+              <div className="row-sub">
+                <span className={`badge${isHR ? ' hr' : ''}`}>
+                  {isHR
+                    ? `HashRange${primary?.range_type ? ` · ${primary.range_type}` : ''}`
+                    : 'Hash'}
+                </span>
+                {altCount > 0 && ` +${altCount} alt`}
+                {s.owner_app_id ? ` · ${s.owner_app_id}` : ` · ${s.name}`}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      {catalog && (
-        <div className="pager">
-          <span>
-            {withData} with data or uncounted · counted {new Date(catalog.fetched_at).toLocaleTimeString()}
-          </span>
-        </div>
-      )}
+      <div className="pager">
+        <span>
+          {rows.length} of {all.length} {all.length === 1 ? 'schema' : 'schemas'}
+        </span>
+      </div>
     </div>
   );
-}
-
-function countText(s) {
-  if (s.record_count != null) return s.record_count;
-  return s.has_data == null ? '?' : '—';
 }

@@ -1,17 +1,18 @@
 # LastDB Browser
 
-An interactive browser for a local LastDB node. Four columns, four levels:
+An interactive read-only browser for a local LastDB node. Five columns, five levels:
 
 ```
-schemas ──▶ keys ──▶ record ──▶ field
+databases ──▶ schemas ──▶ keys ──▶ record ──▶ field
 ```
 
-Select a schema to read its definition. Select a key to read the record's field values and metadata.
-Select a field to show its value, its file, and its field key. This step sends no node request.
-The footer shows each request, its latency, and its response size.
+1. Select a database on the node to load its schemas.
+2. Select a schema to inspect its definition and list its keys.
+3. Select a key (via cursor-paged browse or keyed lookup, including named alternate keys) to read its record.
+4. Inspect the record's metadata (`revision`, `created_by`, `updated_by`, `file`) and field values.
+5. Click any field to view its pretty-printed content, field hash, and local file actions without another node request.
 
-Each schema owns its record values. Canonical field reuse supplies definitions only.
-Named alternate keys find the same records through fields declared in that schema.
+The footer logs every node request with its latency and response size.
 
 ## Run
 
@@ -24,74 +25,34 @@ Then open http://127.0.0.1:7666. `npm start` builds the UI and runs the bridge;
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LASTDB_SOCKET` | `~/.lastdb/data/folddb.sock` | Node's unix socket |
-| `PORT` | `7666` | Bridge port |
+| `LASTDB_SOCKET` | `$LASTDB_SOCKET_PATH` or `~/.lastdb/data/folddb.sock` | Node unix socket |
+| `LASTDB_APP` | unset | App ID sent as `X-LastDB-App` on the app socket |
+| `LASTDB_BROWSER_PORT` / `PORT` | `7666` | Bridge port |
 
-## The four levels
+## Node API calls
 
-**1 · Schemas.** Lists schemas that hold data, with their record counts, key
-layout, and owning app. A node carries around a thousand seeded schema
-definitions with nothing behind them, so empty ones are behind a toggle.
-A node can return a null `record_count` (and a null `has_data`) when it cannot
-count a schema. The list shows that schema with the count `?`; it does not hide it.
-
-**2 · Keys.** Either *browse* — a cursor page from the node's keys-only list
-route — or *keyed lookup*, a direct `HashKey` / `HashRangeKey` /
-`HashRangePrefix` read. Browse reads no field values and does not compute a
-total census; lookup remains the node's O(1) / O(log M) access pattern.
-
-**3 · Record.** One record, every field, with each field's value, type,
-description, and field key. The record carries one metadata block.
-
-**4 · Field.** The value of one field from the record read and its field key
-from the schema. The pane also shows files, as described below.
-The node stores one record per key, and a field has no metadata of its own.
-So this level reads nothing more from the node.
-
-## Files
-
-A field value can name a filesystem path.
-
-A **filesystem path** gets *Open*, *Reveal in Finder*, and *Copy path*. The path
-is checked against disk first, and the buttons appear only if it resolves. Paths
-come out of the database, so they are treated as untrusted input: the bridge
-uses `execFile` with an argument array rather than a shell, and refuses to
-*open* anything the OS would execute — those are Reveal-only.
-
-## Why there is a bridge
-
-Browsers cannot open a unix socket, so `server.mjs` forwards to the node. It is
-deliberately thin — it forwards, times, and caches exactly one call — and it is
-read-only: every route maps to a `GET` or to the read-only `POST /api/query`,
-with no path to `/api/mutation`.
-
-## What each level costs
+Every read uses the LastDB v1 App API (`POST /v1/x/databases` and `POST /v1/read`), with no path to `/v1/write`:
 
 | Level | Node call | Notes |
 |---|---|---|
-| Schemas | `GET /api/schemas?include_counts=true` | Slow (it counts every schema); cached to disk. The only cached read. |
-| Schema shape | `GET /api/schema/{name}` | Field types, descriptions, field key ids. |
-| Keys — browse | `GET /api/list?schema=…&limit=…&cursor=…` | Keys only, cursor-paged, no bodies or scan header. |
-| Keys — lookup | `POST /api/query`, key-restricted | O(1) / O(log M). Returns the full record. No scan header. |
-| Record | `POST /api/query`, keyed | Returns the full record for one key. |
-| Field | none | The value comes from the record read. |
+| 1 · Databases | `POST /v1/x/databases` `{ action: "list" }` | Personal, owned, and received shared databases on the node. |
+| 2 · Schemas | `POST /v1/x/databases` `{ action: "schemas", database, include_full: true }` | All schemas on the selected database, including `record_keys`, field types, descriptions, and field hashes. |
+| 3 · Keys (browse) | `POST /v1/read` `{ database, schema, keys_only: true, limit, cursor }` | Cursor-paged primary key identities; reads no field values. |
+| 3 · Keys (lookup) | `POST /v1/read` `{ database, schema, key \| range, via? }` | Direct primary or alternate-key lookup (`ReadByKey` / `ReadByRange`). |
+| 4 · Record | `POST /v1/read` `{ database, schema, key }` | Full record (`record`, `revision`, `created_by`, `updated_by`, `file`) for one primary key. |
+| 5 · Field | none | Reuses the field value and schema metadata already loaded. |
 
-## Browse pagination
+## Files
 
-Browse follows the opaque `next_cursor` returned by `/api/list`; it never turns
-that cursor into an offset and never asks the node for a complete count. The UI
-keeps the cursors it has already visited so Back is local, while Forward sends
-the exact cursor issued by the node. Deleting a record removes its identity from
-the next refreshed list page. Clicking any listed key still performs the normal
-point/range query to hydrate that record.
+A field value that resolves to an existing local path offers *Open*, *Reveal in Finder*, and *Copy path*. Paths come out of the database and are treated as untrusted input: the bridge uses `execFile` with an argument array rather than a shell, and refuses to open executable bundles (Reveal only).
 
 ## Layout
 
 ```
-server.mjs         bridge: socket forwarding, schema-catalog cache, file access, static serving
+server.mjs         read-only HTTP-to-socket bridge (/v1/x/databases + /v1/read + safe file stat/open)
 src/api.js         one function per drill-down step; the hydration policy lives here
 src/useAsync.js    load-on-open with a stale-response guard
-src/components/    SchemaList · KeyList · RecordPane · FieldPane · RequestLog
+src/components/    DatabaseList · SchemaList · KeyList · RecordPane · FieldPane · RequestLog
 ```
 
-The tests are deleted (Tom, 2026-10-09). The gate (`.lastgit/ci.sh`) runs `npm ci`, the build, syntax checks and source checks.
+The tests are deleted (Tom, 2026-10-09). The gate (`.lastgit/ci.sh`) runs `npm ci`, the build, syntax checks, and source checks.

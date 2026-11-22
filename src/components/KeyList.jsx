@@ -1,61 +1,53 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import * as api from '../api.js';
 import { useAsync } from '../useAsync.js';
 
 const PAGE_SIZES = [25, 50, 100, 250];
 
 /**
- * Level 2 — the keys in one schema.
+ * Level 3 — keys in the selected schema on the selected database.
  *
- * Two ways in, and the difference matters enough to show it in the UI:
- *
- *  · BROWSE is a cursor page from the node's keys-only `/api/list` route. It
- *    does not read field values, compute a census, or carry a scan header.
- *
- *  · LOOKUP is the node's real access pattern — HashKey for a partition,
- *    HashRangeKey for a record, HashRangePrefix for a slice of one partition.
- *    O(1) / O(log M), no scan header, fast on schemas where browse is not.
- *
- * LOOKUP is a keyed query. The node returns the full record. Browse needs no
- * field list because `/api/list` returns identities directly.
+ *  · BROWSE pages primary keys via `POST /v1/read` (`keys_only: true`).
+ *  · KEYED LOOKUP queries one key or range via `POST /v1/read` (`ReadByKey` /
+ *    `ReadByRange`), using either the primary key or a named alternate key
+ *    (`via`). Every returned record carries its primary `key`, so clicking any
+ *    result opens that record in Level 4.
  */
-export default function KeyList({ schema, selectedKey, onSelect }) {
+export default function KeyList({ database, schema, selectedKey, onSelect }) {
   const [limit, setLimit] = useState(50);
   const [browsePage, setBrowsePage] = useState({ cursor: null, start: 0 });
   const [browseHistory, setBrowseHistory] = useState([]);
   const [mode, setMode] = useState('browse'); // 'browse' | 'lookup'
+  const [via, setVia] = useState(''); // '' = primary, otherwise alternate key name
   const [hashInput, setHashInput] = useState('');
   const [rangeInput, setRangeInput] = useState('');
-  const [lookup, setLookup] = useState(null); // committed lookup filter
+  const [lookup, setLookup] = useState(null);
 
-  const hashField = schema?.key?.hash_field;
-  const rangeField = schema?.key?.range_field;
-  const isHashRange = Boolean(rangeField);
-
-  // Reset paging and lookup when the schema changes.
-  useEffect(() => {
-    setBrowsePage({ cursor: null, start: 0 });
-    setBrowseHistory([]);
-    setMode('browse');
-    setHashInput('');
-    setRangeInput('');
-    setLookup(null);
-  }, [schema?.name]);
+  const primaryDef = schema?.record_keys?.primary ?? {
+    kind: schema?.schema_type === 'HashRange' ? 'hash_range' : 'hash',
+  };
+  const alternates = schema?.record_keys?.alternates ?? {};
+  const altNames = Object.keys(alternates);
+  const activeKeyDef = via && alternates[via] ? alternates[via] : primaryDef;
+  const isHashRange = activeKeyDef?.kind === 'hash_range';
 
   const result = useAsync(
-    !schema
+    !database || !schema
       ? null
       : mode === 'lookup'
         ? lookup
-          ? () => api.keyLookup(schema.name, lookup).then((data) => ({ data }))
+          ? () => api.keyLookup(database.id, schema.name, lookup, { limit })
           : null
-        : () => api.keyList(schema.name, { cursor: browsePage.cursor, limit }).then((data) => ({ data })),
-    [schema?.name, mode, browsePage.cursor, limit, JSON.stringify(lookup)],
+        : () => api.keyList(database.id, schema.name, { cursor: browsePage.cursor, limit }),
+    [database?.id, schema?.name, mode, browsePage.cursor, limit, JSON.stringify(lookup)],
   );
 
   const { loading, error } = result;
-  const data = result.data?.data ?? null;
-  const rows = mode === 'browse' ? (data?.keys ?? []) : (data?.results ?? []);
+  const data = result.data ?? null;
+  const rows =
+    mode === 'browse'
+      ? (data?.keys ?? []).map((k) => ({ key: k }))
+      : (data?.records ?? []);
 
   function previousBrowsePage() {
     if (browseHistory.length === 0) return;
@@ -74,12 +66,13 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
     const hash = hashInput.trim();
     if (!hash) return;
     const range = rangeInput.trim();
+    const viaPart = via ? { via } : {};
     if (isHashRange && range) {
-      setLookup({ HashRangeKey: { hash, range } });
+      setLookup({ ...viaPart, key: { hash, range } });
     } else if (isHashRange && !range) {
-      setLookup({ HashKey: hash });
+      setLookup({ ...viaPart, range: { hash } });
     } else {
-      setLookup({ HashKey: hash });
+      setLookup({ ...viaPart, key: { hash } });
     }
   }
 
@@ -87,14 +80,15 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
     const hash = hashInput.trim();
     const prefix = rangeInput.trim();
     if (!hash) return;
-    setLookup({ HashRangePrefix: { hash, prefix } });
+    const viaPart = via ? { via } : {};
+    setLookup({ ...viaPart, range: prefix ? { hash, prefix } : { hash } });
   }
 
-  if (!schema) {
+  if (!database || !schema) {
     return (
       <div className="col col-keys">
         <div className="col-head">
-          <div className="col-title">2 · Keys</div>
+          <div className="col-title">3 · Keys</div>
         </div>
         <div className="empty">Pick a schema to list its keys.</div>
       </div>
@@ -105,7 +99,7 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
     <div className="col col-keys">
       <div className="col-head">
         <div className="col-title">
-          <span>2 · Keys</span>
+          <span>3 · Keys</span>
           {loading && <span className="spin" />}
         </div>
         <div className="toolbar">
@@ -125,35 +119,63 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
 
         {mode === 'lookup' && (
           <form onSubmit={runLookup} style={{ marginTop: 6, display: 'grid', gap: 5 }}>
+            {altNames.length > 0 && (
+              <select
+                value={via}
+                onChange={(e) => {
+                  setVia(e.target.value);
+                  setLookup(null);
+                }}
+                style={{
+                  background: 'var(--bg)',
+                  color: 'inherit',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: 5,
+                  padding: '4px 8px',
+                  font: 'inherit',
+                }}
+              >
+                <option value="">primary key ({primaryDef.kind})</option>
+                {altNames.map((name) => (
+                  <option key={name} value={name}>
+                    via {name} ({alternates[name].kind})
+                  </option>
+                ))}
+              </select>
+            )}
             <input
-              placeholder={`${hashField} (hash)…`}
+              placeholder="hash coordinate…"
               value={hashInput}
               onChange={(e) => setHashInput(e.target.value)}
             />
             {isHashRange && (
               <input
-                placeholder={`${rangeField} (range, or prefix)…`}
+                placeholder={`range (${activeKeyDef.range_type || 'String'}, or prefix)…`}
                 value={rangeInput}
                 onChange={(e) => setRangeInput(e.target.value)}
               />
             )}
             <div className="toolbar" style={{ marginTop: 0 }}>
               <button type="submit">
-                {isHashRange && rangeInput.trim() ? 'HashRangeKey' : 'HashKey'}
+                {isHashRange && rangeInput.trim()
+                  ? 'Exact key'
+                  : isHashRange
+                    ? 'All under hash'
+                    : 'Exact key'}
               </button>
               {isHashRange && (
                 <button type="button" onClick={runPrefix}>
-                  HashRangePrefix
+                  Range prefix
                 </button>
               )}
             </div>
-            <div className="note">Keyed read — no scan, O(1) / O(log M).</div>
+            <div className="note">Keyed read via <code>POST /v1/read</code>.</div>
           </form>
         )}
 
         {mode === 'browse' && (
           <div className="note" style={{ marginTop: 6 }}>
-            Cursor page via <code>GET /api/list</code> · keys only · no scan
+            Cursor page via <code>POST /v1/read</code> (<code>keys_only</code>)
           </div>
         )}
       </div>
@@ -162,27 +184,25 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
 
       <div className="col-body">
         {mode === 'lookup' && !lookup && !error && (
-          <div className="empty">
-            Enter a {hashField} value to read one partition directly.
-          </div>
+          <div className="empty">Enter a hash coordinate to look up keys directly.</div>
         )}
         {!loading && !error && rows.length === 0 && (mode === 'browse' || lookup) && (
-          <div className="empty">
-            No rows.
-          </div>
+          <div className="empty">No keys in this schema.</div>
         )}
         {rows.map((r, i) => {
           const k = r.key || {};
           const isSel =
-            selectedKey && selectedKey.hash === k.hash && (selectedKey.range ?? null) === (k.range ?? null);
+            selectedKey &&
+            selectedKey.hash === k.hash &&
+            (selectedKey.range ?? null) === (k.range ?? null);
           return (
             <button
-              key={`${k.hash}|${k.range ?? ''}|${i}`}
+              key={`${k.hash ?? ''}|${k.range ?? ''}|${i}`}
               className={`row${isSel ? ' sel' : ''}`}
-              onClick={() => onSelect({ hash: k.hash, range: k.range ?? null })}
+              onClick={() => onSelect({ hash: k.hash ?? '', range: k.range ?? null })}
             >
               <div className="row-main">
-                <span className="row-name">{k.hash}</span>
+                <span className="row-name">{k.hash || '(empty)'}</span>
               </div>
               {k.range != null && <div className="row-sub">↳ {k.range}</div>}
             </button>
@@ -196,10 +216,10 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
             <button onClick={previousBrowsePage} disabled={browseHistory.length === 0 || loading}>
               ←
             </button>
-            <button onClick={nextBrowsePage} disabled={!data?.has_more || !data?.next_cursor || loading}>
+            <button onClick={nextBrowsePage} disabled={!data?.has_more || loading}>
               →
             </button>
-            <span title="The list route is cursor-paged and deliberately does not compute a total census">
+            <span title="Cursor-paged primary key listing">
               {rows.length ? `${browsePage.start + 1}–${browsePage.start + rows.length}` : '0'}
             </span>
             <span style={{ flex: 1 }} />
@@ -210,7 +230,12 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
                 setBrowsePage({ cursor: null, start: 0 });
                 setBrowseHistory([]);
               }}
-              style={{ background: 'var(--bg-raised)', color: 'inherit', border: '1px solid var(--border-strong)', borderRadius: 4 }}
+              style={{
+                background: 'var(--bg-raised)',
+                color: 'inherit',
+                border: '1px solid var(--border-strong)',
+                borderRadius: 4,
+              }}
             >
               {PAGE_SIZES.map((n) => (
                 <option key={n} value={n}>
@@ -220,7 +245,9 @@ export default function KeyList({ schema, selectedKey, onSelect }) {
             </select>
           </>
         ) : (
-          <span>{rows.length} row{rows.length === 1 ? '' : 's'}</span>
+          <span>
+            {rows.length} {rows.length === 1 ? 'record' : 'records'}
+          </span>
         )}
       </div>
     </div>
