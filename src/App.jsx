@@ -131,6 +131,11 @@ export default function App() {
             {status.socket}
           </span>
         )}
+        <span className="shortcut-legend" aria-label="Keyboard shortcuts">
+          <span>Keyboard</span>
+          <kbd>Tab</kbd><span>focus</span>
+          <kbd>Enter</kbd><span>select</span>
+        </span>
         <span className="spacer" />
         <span className="note" style={{ whiteSpace: 'nowrap' }}>
           databases → schemas → keys → record
