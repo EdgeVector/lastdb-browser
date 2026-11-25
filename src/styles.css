@@ -106,6 +106,26 @@ code, .mono { font-family: var(--mono); }
 
 .topbar .spacer { flex: 1; }
 
+.shortcut-legend {
+  align-items: center;
+  color: var(--fg-dim);
+  display: flex;
+  font-size: 10.5px;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.shortcut-legend kbd {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
 .dot {
   width: 7px;
   height: 7px;
